@@ -24,6 +24,9 @@ RTC::RTC()
         // January 21, 2014 at 3am you would call:
         // rtc.adjust(DateTime(2014, 1, 21, 3, 0, 0));
     }
+
+    startTime = _rtc.now();
+
 }
 
 RTC::~RTC()
@@ -32,10 +35,6 @@ RTC::~RTC()
 
 void RTC::printRTCData()
 {
-    Serial.println("halo");
-
-    DateTime startTime = _rtc.now();
-
     Serial.print(startTime.year(), DEC);
     Serial.print('/');
     Serial.print(startTime.month(), DEC);
