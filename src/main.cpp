@@ -47,7 +47,7 @@ void setup()
     pAdvertising = BLEDevice::getAdvertising();
 
     // Mengatur Beacon config
-    // setCustomBeacon();
+    setCustomBeacon();
 
     // Mulai advertising
     pAdvertising->start();
@@ -107,6 +107,15 @@ static void setCustomBeacon()
      * Total size: ~8 bytes (well within BLE’s advertisement limits).
      * */
 
+    const uint16_t beaconUUID = 0xFEAA;
+
+    // atur data advertising
+    BLEAdvertisementData oAdvertisementData = BLEAdvertisementData();
+    BLEAdvertisementData oScanResponseData = BLEAdvertisementData();
+
+    oScanResponseData.setFlags(0x06); // GENERAL_DISC_MODE 0x02 | BR_EDR_NOT_SUPPORTED 0x04
+    oScanResponseData.setCompleteServices(BLEUUID(beaconUUID));
+
     uint16_t voltage = 3300;         // dalam millivolts
     float current = 1.5;             // dalam ampere
     uint32_t timestamp = 1678801234; // contoh Unix TimeStamp
@@ -118,5 +127,17 @@ static void setCustomBeacon()
     char customData[9]; // 2 bytes untu voltage, 2 bytes untuk current, 4 bytes untuk timestamp
 
     // data dikemas
-    
+    customData[0] = (voltage >> 8);
+    customData[1] = (voltage & 0xFF);
+    customData[2] = (currentFixedPoint >> 8);
+    customData[3] = (currentFixedPoint & 0xFF);
+    customData[4] = (timestamp >> 24);
+    customData[5] = (timestamp >> 16);
+    customData[6] = (timestamp >> 8);
+    customData[7] = (timestamp & 0xFF);
+
+    oScanResponseData.setServiceData(BLEUUID(beaconUUID), std::string(customData, sizeof(customData)));
+    oAdvertisementData.setName("OMU Demo Data");
+    pAdvertising->setAdvertisementData(oAdvertisementData);
+    pAdvertising->setScanResponseData(oScanResponseData);
 }
