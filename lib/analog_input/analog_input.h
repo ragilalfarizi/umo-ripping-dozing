@@ -10,8 +10,8 @@ public:
     AnalogInput();
     ~AnalogInput();
     void printAnalogInputValue();
+    float readjustAnalogIn();
 
 private:
     Adafruit_ADS1115 _ads;
-    float readjustAnalogIn();
 };

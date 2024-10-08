@@ -43,7 +43,7 @@ void AnalogInput::printAnalogInputValue()
 
     Serial.println("-----------------------------------------------------------");
     Serial.printf("AIN2: %d\tVolt: %.2f\n", adc, volt);
-    Serial.printf("NILAI AIN4 HASIL READJUST : %.2f\n", readjustAnalogIn());
+    Serial.printf("NILAI AIN2 HASIL READJUST : %.2f\n", readjustAnalogIn());
     Serial.println("-----------------------------------------------------------");
 
     vTaskDelay(pdMS_TO_TICKS(1000));
