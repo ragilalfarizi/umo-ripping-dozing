@@ -50,19 +50,6 @@ void setup()
     BLEDevice::setPower(ESP_PWR_LVL_N12);
     pAdvertising = BLEDevice::getAdvertising();
 
-    // Mengatur Beacon config
-    // setCustomBeacon();
-
-    // Mulai advertising
-    // Serial.println("Advertising dimulai...");
-    // pAdvertising->start();
-
-    // Serial.println("Advertizing started for 10s ...");
-    // delay(30000);
-    // pAdvertising->stop();
-
-    // Serial.println("setup done");
-
     xTaskCreatePinnedToCore(RTCDemo, "RTC Demo", 2048, NULL, 3, &RTCDemoHandler, 0);
     xTaskCreatePinnedToCore(analogDemo, "Analog Demo", 2048, NULL, 3, &analogDemoHandler, 0);
     xTaskCreatePinnedToCore(sendBLEData, "Send BLE Data", 2048, NULL, 3, &sendBLEDataHandler, 1);
@@ -70,9 +57,6 @@ void setup()
 
 void loop()
 {
-    // Serial.println("Halo World!");
-    // rtc->printRTCData();
-    // delay(1000);
 }
 
 static void RTCDemo(void *pvParam)
@@ -84,7 +68,7 @@ static void RTCDemo(void *pvParam)
             rtc->printRTCData();
 
             xSemaphoreGive(xSemaphore);
-            vTaskDelay(pdMS_TO_TICKS(1000));
+            vTaskDelay(pdMS_TO_TICKS(100));
         }
     }
 }
@@ -95,10 +79,10 @@ static void analogDemo(void *pvParam)
     {
         if (xSemaphoreTake(xSemaphore, portMAX_DELAY))
         {
-            ain->printAnalogInputValue();
+            ain->printRawAnalogInputValue();
 
             xSemaphoreGive(xSemaphore);
-            vTaskDelay(pdMS_TO_TICKS(1000));
+            vTaskDelay(pdMS_TO_TICKS(100));
         }
     }
 }
@@ -124,7 +108,7 @@ static void setCustomBeacon()
     oScanResponseData.setCompleteServices(BLEUUID(beaconUUID));
 
     uint16_t voltage = random(2800, 3700); // dalam millivolts
-    analogInputVal = ain->readjustAnalogIn();
+    analogInputVal = ain->readAnalogInput(AnalogPin::PIN_A1);
     // float current = 1.5;             // dalam ampere
     // uint32_t timestamp = 1678801234; // contoh Unix TimeStamp
 
