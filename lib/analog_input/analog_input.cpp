@@ -32,7 +32,7 @@ AnalogInput::~AnalogInput() {}
 
 /** @brief
  * pengujian kalibrasi dilakukan dengan cara memberikan
- * tegangan tertentu, yaitu 0 dan 3V ke pada pin analog
+ * tegangan tertentu, yaitu 0 dan 3V pada pin analog
  * input. kemudian hasil pembacaan ads dilihat dan
  * menunjukkan angka 56 dan 1061.
  * kita bisa menggunakan persamaan linear (y = m.x + b)
@@ -44,7 +44,7 @@ float AnalogInput::readAnalogInput(AnalogPin pin)
     float voltage;
     int16_t adcReading = _ads.readADC_SingleEnded(static_cast<uint8_t>(pin));
 
-    // math equation
+    // persamaan linear. sesuaikan apabila perlu.
     voltage = (0.002985 * adcReading) - 0.1672;
 
     return voltage;
