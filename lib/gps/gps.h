@@ -12,6 +12,7 @@ public:
     double getlatitude();
     bool getValidation();
     int32_t getCharProcessed();
+    void encode(char c);
 
 private:
     TinyGPSPlus _gps;

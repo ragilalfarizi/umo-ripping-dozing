@@ -10,6 +10,10 @@
 #include "common.h"
 #include "gps.h"
 
+// #define Serial1 "modbus";
+#define PIN_RX_RS485 18
+#define PIN_TX_RS485 19
+
 /* DEKLARASI OBJEK YANG DIGUNAKAN TERSIMPAN DI HEAP */
 RTC *rtc;
 AnalogInput *ain;
@@ -34,6 +38,7 @@ SemaphoreHandle_t xSemaphore = NULL;
 /* GLOBAL VARIABLES */
 BLEAdvertising *pAdvertising;
 BeaconData_t data;
+HardwareSerial modbus(1);
 
 // float analogInputVal = 0;
 // GPSData_s Internalgps;
@@ -43,7 +48,7 @@ BeaconData_t data;
 void setup()
 {
     /* SERIAL INIT */
-    Serial.begin(115200);
+    Serial.begin(9600);
     Serial.println("Mesin dinyalakan");
 
     /* RTC INIT */
@@ -62,6 +67,10 @@ void setup()
     data.gps.longitude = 0;
     data.gps.status = 'A';
 
+    /* RS485 INIT */
+    Serial.println("Inisialisasi RS485");
+    modbus.begin(9600, SERIAL_8N1, PIN_RX_RS485, PIN_TX_RS485);
+
     xSemaphore = xSemaphoreCreateBinary();
     xSemaphoreGive(xSemaphore);
 
@@ -71,10 +80,10 @@ void setup()
     pAdvertising = BLEDevice::getAdvertising();
 
     xTaskCreatePinnedToCore(RTCDemo, "RTC Demo", 2048, NULL, 3, &RTCDemoHandler, 1);
-    xTaskCreatePinnedToCore(dataAcquisition, "Analog Demo", 2048, NULL, 3, &dataAcquisitionHandler, 1);
+    xTaskCreatePinnedToCore(dataAcquisition, "Analog Demo", 4096, NULL, 3, &dataAcquisitionHandler, 1);
     xTaskCreatePinnedToCore(sendBLEData, "Send BLE Data", 2048, NULL, 3, &sendBLEDataHandler, 0);
-    xTaskCreatePinnedToCore(retrieveGPSData, "get GPS Data", 2048, NULL, 3, &retrieveGPSHandler, 1);
-    // xTaskCreatePinnedToCore(sendToRS485, "send data to RS485", 2048, NULL, 3, &sendToRS485Handler, 0);
+    xTaskCreatePinnedToCore(retrieveGPSData, "get GPS Data", 2048, NULL, 4, &retrieveGPSHandler, 1);
+    xTaskCreatePinnedToCore(sendToRS485, "send data to RS485", 2048, NULL, 3, &sendToRS485Handler, 0);
 }
 
 void loop()
@@ -198,8 +207,16 @@ static void retrieveGPSData(void *pvParam)
 {
     bool isValid = false;
 
-    while (1)
+    while (1) // void loop
     {
+        Serial.println("[GPS] encoding...");
+        
+        while (Serial.available() > 0)
+        {
+            char gpsChar = Serial.read();
+            gps->encode(gpsChar);
+        }
+
         isValid = gps->getValidation();
 
         if ((gps->getCharProcessed()) < 10)
@@ -225,8 +242,19 @@ static void retrieveGPSData(void *pvParam)
 
 static void sendToRS485(void *pvParam)
 {
+
     while (1)
     {
         // do something
+        // modbus.printf("============================================\n");
+        // modbus.printf("GPS STATUS\t\t= %c\n", data.gps.status);
+        // modbus.printf("GPS LATITUDE\t\t= %f\n", data.gps.latitude);
+        // modbus.printf("GPS LONGITUDE\t\t= %f\n", data.gps.longitude);
+        // modbus.printf("Analog Input\t\t= %.2f\n", data.voltageSupply);
+        // modbus.printf("============================================\n");
+
+        modbus.printf("%c,%f,%f,%.2f", data.gps.status, data.gps.latitude, data.gps.longitude, data.voltageSupply);
+
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }

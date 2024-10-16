@@ -27,3 +27,8 @@ int32_t GPS::getCharProcessed()
 {
     return _gps.charsProcessed();
 }
+
+void GPS::encode(char c)
+{
+    _gps.encode(c);
+}
