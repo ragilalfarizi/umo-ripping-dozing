@@ -10,13 +10,11 @@
 #include "common.h"
 #include "gps.h"
 
-#define PIN_RX_RS485 18
-#define PIN_TX_RS485 19
-
 /* DEKLARASI OBJEK YANG DIGUNAKAN TERSIMPAN DI HEAP */
 RTC *rtc;
 AnalogInput *ain;
 GPS *gps;
+// TODO: EEPROM
 
 /* FORWARD DECLARATION UNTUK FUNGSI-FUNGSI DI DEPAN*/
 static void RTCDemo(void *pvParam);
@@ -24,6 +22,8 @@ static void dataAcquisition(void *pvParam);
 static void sendBLEData(void *pvParam);
 static void retrieveGPSData(void *pvParam);
 static void sendToRS485(void *pvParam);
+static void countingHourMeter(void *pvParam);
+static void serialConfig(void *pvParam);
 static void setCustomBeacon();
 
 /* FORWARD DECLARATION UNTUK HANDLER DAN SEMAPHORE RTOS */
@@ -32,12 +32,14 @@ TaskHandle_t dataAcquisitionHandler = NULL;
 TaskHandle_t sendBLEDataHandler = NULL;
 TaskHandle_t retrieveGPSHandler = NULL;
 TaskHandle_t sendToRS485Handler = NULL;
+TaskHandle_t countingHMHandler = NULL;
 SemaphoreHandle_t xSemaphore = NULL;
 
 /* GLOBAL VARIABLES */
 BLEAdvertising *pAdvertising;
 BeaconData_t data;
 HardwareSerial modbus(1);
+// TODO: Declare Setting_t
 
 void setup()
 {
@@ -73,11 +75,27 @@ void setup()
     BLEDevice::setPower(ESP_PWR_LVL_N12);
     pAdvertising = BLEDevice::getAdvertising();
 
-    xTaskCreatePinnedToCore(RTCDemo, "RTC Demo", 2048, NULL, 3, &RTCDemoHandler, 1);
+    // TODO: HourMeter init
+    /* HOUR METER INIT */
+    //  declare HourMeter object
+    //  if saved settings exist,
+    //      load to currentTracking
+    //      currentHourMeter = savedHourMeter;
+    //      print to the console for debug
+    //  else
+    //      currentTracking value is default
+    //      print to the console for debug
+
+    xTaskCreatePinnedToCore(RTCDemo, "RTC Demo", 2048, NULL, 3, &RTCDemoHandler, 1); // TODO: Depreciating
     xTaskCreatePinnedToCore(dataAcquisition, "Analog Demo", 4096, NULL, 3, &dataAcquisitionHandler, 1);
     xTaskCreatePinnedToCore(sendBLEData, "Send BLE Data", 2048, NULL, 3, &sendBLEDataHandler, 0);
     xTaskCreatePinnedToCore(retrieveGPSData, "get GPS Data", 2048, NULL, 4, &retrieveGPSHandler, 1);
     xTaskCreatePinnedToCore(sendToRS485, "send data to RS485", 2048, NULL, 3, &sendToRS485Handler, 0);
+    // xTaskCreatePinnedToCore(countingHourMeter, "Updating Hour Meter", 2048, NULL, 3, &countingHMHandler, 1); // TODO: Impelement
+
+    // TODO: load HourMeter data from EEPROM
+    // currentHourMeter = savedHourMeter;
+    // then continue counting
 }
 
 void loop()
@@ -188,6 +206,11 @@ static void sendBLEData(void *pvParam)
     }
 }
 
+/**
+ * WARNING: Haven't fully tested. It should be working.
+ *          But when I tested it, it took too long to retreive
+ *          GPS Data.
+ * */
 static void retrieveGPSData(void *pvParam)
 {
     bool isValid = false;
@@ -195,7 +218,7 @@ static void retrieveGPSData(void *pvParam)
     while (1) // void loop
     {
         Serial.println("[GPS] encoding...");
-        
+
         while (Serial.available() > 0)
         {
             char gpsChar = Serial.read();
@@ -233,5 +256,32 @@ static void sendToRS485(void *pvParam)
         modbus.printf("%c,%f,%f,%.2f", data.gps.status, data.gps.latitude, data.gps.longitude, data.voltageSupply);
 
         vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+
+/**
+ * @brief   : Task to receive new config and update them.
+ *            Default state is not running. Only the interrupt
+ *            from RS485 input will make it run.
+ * @param   : none
+ * @retval  : none
+ */
+static void serialConfig(void *pvParam)
+{
+    while (1)
+    {
+        // TODO: Print RS485 input
+        // TODO: Parse
+        // TODO: update to EEPROM
+    }
+}
+
+static void countingHourMeter(void *pvParam)
+{
+    while (1)
+    {
+        // TODO: Start the tick from RTC
+        // TODO: update the currentHourMeters tick
+        // TODO: save to eeprom
     }
 }
