@@ -10,7 +10,6 @@
 #include "common.h"
 #include "gps.h"
 
-// #define Serial1 "modbus";
 #define PIN_RX_RS485 18
 #define PIN_TX_RS485 19
 
@@ -39,11 +38,6 @@ SemaphoreHandle_t xSemaphore = NULL;
 BLEAdvertising *pAdvertising;
 BeaconData_t data;
 HardwareSerial modbus(1);
-
-// float analogInputVal = 0;
-// GPSData_s Internalgps;
-// float voltageSupply = 0;
-// time_t lastTenth = 0;
 
 void setup()
 {
@@ -150,13 +144,6 @@ static void setCustomBeacon()
     // int16_t currentFixedPoint = (int16_t)(current * 256);
     // int16_t analogInputFixedPoint = (int16_t)(analogInputVal * 256);
 
-    // char customData[4]; // 2 bytes untu voltage, 2 bytes untuk current, 4 bytes untuk timestamp
-
-    // customData[0] = 0x20;
-    // customData[1] = 0x00;
-    // customData[2] = (analogInputFixedPoint >> 8) & 0xFF;
-    // customData[3] = (analogInputFixedPoint & 0xFF);
-
     /* PROCESSING DATA SEBELUM DIKIRIM MELALUI BLE */
     char beacon_data[15];
     uint16_t volt = data.voltageSupply * 1000; // 3300mV = 3.3V
@@ -196,10 +183,8 @@ static void sendBLEData(void *pvParam)
     {
         setCustomBeacon();
         pAdvertising->start();
-        // vTaskDelay(pdMS_TO_TICKS(3000)); // advertising selama 3 detik
         Serial.println("[BLE] Advertising...");
-        // pAdvertising->stop();
-        vTaskDelay(pdMS_TO_TICKS(1000)); // advertising selama 3 detik
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
 
@@ -245,14 +230,6 @@ static void sendToRS485(void *pvParam)
 
     while (1)
     {
-        // do something
-        // modbus.printf("============================================\n");
-        // modbus.printf("GPS STATUS\t\t= %c\n", data.gps.status);
-        // modbus.printf("GPS LATITUDE\t\t= %f\n", data.gps.latitude);
-        // modbus.printf("GPS LONGITUDE\t\t= %f\n", data.gps.longitude);
-        // modbus.printf("Analog Input\t\t= %.2f\n", data.voltageSupply);
-        // modbus.printf("============================================\n");
-
         modbus.printf("%c,%f,%f,%.2f", data.gps.status, data.gps.latitude, data.gps.longitude, data.voltageSupply);
 
         vTaskDelay(pdMS_TO_TICKS(1000));
