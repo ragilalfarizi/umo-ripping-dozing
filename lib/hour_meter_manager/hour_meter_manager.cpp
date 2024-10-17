@@ -1,26 +1,43 @@
 #include "hour_meter_manager.h"
 
-HourMeter::HourMeter()
+HourMeter::HourMeter(time_t& currentHourMeter, uint16_t storageSize)
 {
-    // if Setting_t and savedHourMeter exist
-    //      load from eeprom
-    // else
-    //      set the all the value to be default
+    if (EEPROM.begin(512))
+    {
+        Serial.printf("Storage has been allocated for 512\n");
+
+        time_t tempHourMeter;
+        EEPROM.get(STORAGE_ADDRESS_HOUR_METER, tempHourMeter);
+
+        currentHourMeter = tempHourMeter;
+
+        Serial.printf("Your saved Hour Meter is %u\n", savedHourMeter);
+    }
+    else
+    {
+        Serial.printf("Failed to allocaate storage\n");
+    }
 }
 
 HourMeter::~HourMeter()
 {
 }
 
-int32_t HourMeter::getSavedHourMeter()
+// int32_t HourMeter::getSavedHourMeter()
+// {
+//     return savedHourMeter;
+// }
+
+time_t HourMeter::loadHMFromStorage()
 {
-    return savedHourMeter;
+    time_t hourMeter;
+    EEPROM.get(STORAGE_ADDRESS_HOUR_METER, hourMeter);
+
+    return hourMeter;
 }
-int32_t HourMeter::saveToEEPROM()
+
+Setting_t HourMeter::loadSettingFromStorage()
 {
-    // TODO: Implement
-}
-int32_t HourMeter::loadFromEEPROM()
-{
-    // TODO: Impelement
+    Setting_t dummy{-1};
+    return dummy;
 }

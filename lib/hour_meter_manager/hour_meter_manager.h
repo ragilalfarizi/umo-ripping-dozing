@@ -1,17 +1,53 @@
 #pragma once
 
 #include <Arduino.h>
+#include <EEPROM.h>
+#include "common.h"
+
+#define STORAGE_ADDRESS_HOUR_METER 0 // Size of Hour Meter is 4 bytes
+#define STORAGE_ADDRESS_SETTINGS 4   // Size of Settings is 4 * 4 bytes
 
 class HourMeter
 {
 public:
-    HourMeter();
+    HourMeter(time_t& currentHourMeter, uint16_t storageSize);
     ~HourMeter();
 
     int32_t getSavedHourMeter();
-    int32_t saveToEEPROM();
-    int32_t loadFromEEPROM();
+
+    template <typename T>
+    bool saveToStorage(const T &data);
+
+    time_t loadHMFromStorage();
+
+    Setting_t loadSettingFromStorage();
+
+    void printStorage();
 
 private:
-    int32_t savedHourMeter;
+    time_t savedHourMeter; // currently not used
 };
+
+template <typename T>
+bool HourMeter::saveToStorage(const T &data)
+{
+    if (std::is_same<T, time_t>::value)
+    {
+        EEPROM.put(STORAGE_ADDRESS_HOUR_METER, data);
+        savedHourMeter =+ data;
+
+        Serial.printf("Now Your hour meter is %u\n", savedHourMeter);
+    }
+    else if (std::is_same<T, Setting_t>::value)
+    {
+        EEPROM.put(STORAGE_ADDRESS_SETTINGS, data);
+    }
+    else
+    {
+        return false;
+    }
+
+    EEPROM.commit();
+
+    return true;
+}
