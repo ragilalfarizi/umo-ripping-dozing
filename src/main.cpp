@@ -9,14 +9,13 @@
 #include "NimBLEEddystoneURL.h"
 #include "common.h"
 #include "gps.h"
-
-#define PIN_RX_RS485 18
-#define PIN_TX_RS485 19
+#include "hour_meter_manager.h"
 
 /* DEKLARASI OBJEK YANG DIGUNAKAN TERSIMPAN DI HEAP */
 RTC *rtc;
 AnalogInput *ain;
 GPS *gps;
+HourMeter *hm;
 
 /* FORWARD DECLARATION UNTUK FUNGSI-FUNGSI DI DEPAN*/
 static void RTCDemo(void *pvParam);
@@ -24,45 +23,55 @@ static void dataAcquisition(void *pvParam);
 static void sendBLEData(void *pvParam);
 static void retrieveGPSData(void *pvParam);
 static void sendToRS485(void *pvParam);
+static void countingHourMeter(void *pvParam);
+static void serialConfig(void *pvParam);
 static void setCustomBeacon();
 
 /* FORWARD DECLARATION UNTUK HANDLER DAN SEMAPHORE RTOS */
-TaskHandle_t RTCDemoHandler = NULL;
+// TaskHandle_t RTCDemoHandler = NULL;
 TaskHandle_t dataAcquisitionHandler = NULL;
 TaskHandle_t sendBLEDataHandler = NULL;
 TaskHandle_t retrieveGPSHandler = NULL;
 TaskHandle_t sendToRS485Handler = NULL;
+TaskHandle_t countingHMHandler = NULL;
 SemaphoreHandle_t xSemaphore = NULL;
 
 /* GLOBAL VARIABLES */
 BLEAdvertising *pAdvertising;
 BeaconData_t data;
 HardwareSerial modbus(1);
+time_t currentHourMeter;
+// TODO: Declare Setting_t
 
 void setup()
 {
     /* SERIAL INIT */
     Serial.begin(9600);
-    Serial.println("Mesin dinyalakan");
+    Serial.println("[Serial] Mesin dinyalakan");
 
     /* RTC INIT */
-    Serial.println("Inisialisasi RTC");
+    Serial.println("[RTC] Inisialisasi RTC");
     rtc = new RTC();
+    if (rtc == nullptr)
+    {
+        Serial.println("[ERROR] Failed to allocate memory for RTC object, retrying in 5 seconds...");
+        vTaskDelay(pdMS_TO_TICKS(5000)); // Wait for 5 seconds before retrying
+    }
 
     /* ANALOG INPUT INIT */
-    Serial.println("Inisialisasi Analog Input");
+    Serial.println("[AIN] Inisialisasi Analog Input");
     ain = new AnalogInput();
     data.voltageSupply = ain->readAnalogInput(AnalogPin::PIN_A0); // untuk membaca di pin_a0 (PIN 1 pada silkscreen)
 
     /* GPS INIT */
-    Serial.println("Inisialisasi GPS");
+    Serial.println("[GPS] Inisialisasi GPS");
     gps = new GPS();
     data.gps.latitude = 0;
     data.gps.longitude = 0;
     data.gps.status = 'A';
 
     /* RS485 INIT */
-    Serial.println("Inisialisasi RS485");
+    Serial.println("[485] Inisialisasi RS485");
     modbus.begin(9600, SERIAL_8N1, PIN_RX_RS485, PIN_TX_RS485);
 
     xSemaphore = xSemaphoreCreateBinary();
@@ -73,11 +82,17 @@ void setup()
     BLEDevice::setPower(ESP_PWR_LVL_N12);
     pAdvertising = BLEDevice::getAdvertising();
 
-    xTaskCreatePinnedToCore(RTCDemo, "RTC Demo", 2048, NULL, 3, &RTCDemoHandler, 1);
-    xTaskCreatePinnedToCore(dataAcquisition, "Analog Demo", 4096, NULL, 3, &dataAcquisitionHandler, 1);
+    hm = new HourMeter(currentHourMeter);
+    currentHourMeter = hm->loadHMFromStorage();
+    Serial.printf("[HM] Hour Meter yang tersimpan adalah %ld\n", currentHourMeter);
+    // TODO: Print juga hour meter dalam jam
+
+    // xTaskCreatePinnedToCore(RTCDemo, "RTC Demo", 2048, NULL, 3, &RTCDemoHandler, 1); // TODO: Depreciating
+    xTaskCreatePinnedToCore(dataAcquisition, "Data Acquisition", 4096, NULL, 3, &dataAcquisitionHandler, 1);
     xTaskCreatePinnedToCore(sendBLEData, "Send BLE Data", 2048, NULL, 3, &sendBLEDataHandler, 0);
     xTaskCreatePinnedToCore(retrieveGPSData, "get GPS Data", 2048, NULL, 4, &retrieveGPSHandler, 1);
     xTaskCreatePinnedToCore(sendToRS485, "send data to RS485", 2048, NULL, 3, &sendToRS485Handler, 0);
+    xTaskCreatePinnedToCore(countingHourMeter, "Updating Hour Meter", 8192, NULL, 3, &countingHMHandler, 0);
 }
 
 void loop()
@@ -119,7 +134,7 @@ static void dataAcquisition(void *pvParam)
             Serial.printf("============================================\n");
 
             xSemaphoreGive(xSemaphore);
-            vTaskDelay(pdMS_TO_TICKS(100));
+            vTaskDelay(pdMS_TO_TICKS(1000));
         }
     }
 }
@@ -188,6 +203,11 @@ static void sendBLEData(void *pvParam)
     }
 }
 
+/**
+ * WARNING: Haven't fully tested. It should be working.
+ *          But when I tested it, it took too long to retreive
+ *          GPS Data.
+ * */
 static void retrieveGPSData(void *pvParam)
 {
     bool isValid = false;
@@ -195,7 +215,7 @@ static void retrieveGPSData(void *pvParam)
     while (1) // void loop
     {
         Serial.println("[GPS] encoding...");
-        
+
         while (Serial.available() > 0)
         {
             char gpsChar = Serial.read();
@@ -206,18 +226,18 @@ static void retrieveGPSData(void *pvParam)
 
         if ((gps->getCharProcessed()) < 10)
         {
-            Serial.println("GPS module not sending data, check wiring or module power");
+            Serial.println("[GPS] GPS module not sending data, check wiring or module power");
         }
         else
         {
             if (isValid)
             {
-                Serial.printf("Latitude : %f", data.gps.longitude);
-                Serial.printf("Longitude : %f", data.gps.longitude);
+                Serial.printf("[GPS] Latitude : %f", data.gps.longitude);
+                Serial.printf("[GPS] Longitude : %f", data.gps.longitude);
             }
             else
             {
-                Serial.println("GPS is searching for a signal...");
+                Serial.println("[GPS] GPS is searching for a signal...");
             }
         }
 
@@ -231,6 +251,51 @@ static void sendToRS485(void *pvParam)
     while (1)
     {
         modbus.printf("%c,%f,%f,%.2f", data.gps.status, data.gps.latitude, data.gps.longitude, data.voltageSupply);
+
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+
+/**
+ * @brief   : Task to receive new config and update them.
+ *            Default state is not running. Only the interrupt
+ *            from RS485 input will make it run.
+ * @param   : none
+ * @retval  : none
+ */
+static void serialConfig(void *pvParam)
+{
+    while (1)
+    {
+        // TODO: Print RS485 input
+        // TODO: Parse
+        // TODO: update to EEPROM
+    }
+}
+
+static void countingHourMeter(void *pvParam)
+{
+    Serial.println("[DEBUG] BARU MULAI COUNTING HOUR METER");
+    DateTime startTime = rtc->now();
+    Serial.printf("[HM] Start Time : \n");
+
+    DateTime pollingTime;
+    time_t runHour, totalRunHour;
+
+    // time_t currentHourMeter = 900;
+    while (1)
+    {
+        pollingTime = rtc->now();
+
+        // Serial.printf("Polling Time: %ld s, Start Time: %lu s\n", pollingTime.secondstime(), startTime.secondstime());
+
+        runHour = static_cast<time_t>(pollingTime.secondstime()) - static_cast<time_t>(startTime.secondstime());
+        // BUG: this printf gives me big number. but the totalRunHour is right
+        // Serial.printf("[HM] run Hour : %lu s\n"); 
+
+        totalRunHour = currentHourMeter + runHour;
+        Serial.printf("[HM] this machine has running hour of %ld s\n", totalRunHour);
+        // TODO: save to eeprom
 
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
