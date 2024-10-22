@@ -2,16 +2,9 @@
 
 HourMeter::HourMeter(time_t& currentHourMeter, uint16_t storageSize)
 {
-    if (EEPROM.begin(512))
+    if (EEPROM.begin(storageSize))
     {
-        Serial.printf("Storage has been allocated for 512\n");
-
-        time_t tempHourMeter;
-        EEPROM.get(STORAGE_ADDRESS_HOUR_METER, tempHourMeter);
-
-        currentHourMeter = tempHourMeter;
-
-        Serial.printf("Your saved Hour Meter is %u\n", savedHourMeter);
+        Serial.printf("Storage has been allocated for %d\n", storageSize);
     }
     else
     {

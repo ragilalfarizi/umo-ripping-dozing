@@ -6,7 +6,7 @@ RTC::RTC()
 
     Wire.begin();
 
-    if (!_rtc.begin())
+    if (!begin())
     {
         Serial.println("Couldn't find RTC");
         Serial.flush();
@@ -14,18 +14,18 @@ RTC::RTC()
             delay(10);
     }
 
-    if (_rtc.lostPower())
+    if (lostPower())
     {
         Serial.println("RTC lost power, let's set the time!");
         // When time needs to be set on a new device, or after a power loss, the
         // following line sets the RTC to the date & time this sketch was compiled
-        _rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+        adjust(DateTime(F(__DATE__), F(__TIME__)));
         // This line sets the RTC with an explicit date & time, for example to set
         // January 21, 2014 at 3am you would call:
         // rtc.adjust(DateTime(2014, 1, 21, 3, 0, 0));
     }
 
-    startTime = _rtc.now();
+    startTime = now();
 
 }
 
@@ -74,7 +74,7 @@ void RTC::printRTCData()
     Serial.println();
 
     Serial.print("Temperature: ");
-    Serial.print(_rtc.getTemperature());
+    Serial.print(getTemperature());
     Serial.println(" C");
 
     // Serial.println();

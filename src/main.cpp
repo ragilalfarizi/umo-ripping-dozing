@@ -9,12 +9,13 @@
 #include "NimBLEEddystoneURL.h"
 #include "common.h"
 #include "gps.h"
+#include "hour_meter_manager.h"
 
 /* DEKLARASI OBJEK YANG DIGUNAKAN TERSIMPAN DI HEAP */
 RTC *rtc;
 AnalogInput *ain;
 GPS *gps;
-// TODO: EEPROM
+HourMeter *hm;
 
 /* FORWARD DECLARATION UNTUK FUNGSI-FUNGSI DI DEPAN*/
 static void RTCDemo(void *pvParam);
@@ -27,7 +28,7 @@ static void serialConfig(void *pvParam);
 static void setCustomBeacon();
 
 /* FORWARD DECLARATION UNTUK HANDLER DAN SEMAPHORE RTOS */
-TaskHandle_t RTCDemoHandler = NULL;
+// TaskHandle_t RTCDemoHandler = NULL;
 TaskHandle_t dataAcquisitionHandler = NULL;
 TaskHandle_t sendBLEDataHandler = NULL;
 TaskHandle_t retrieveGPSHandler = NULL;
@@ -39,32 +40,38 @@ SemaphoreHandle_t xSemaphore = NULL;
 BLEAdvertising *pAdvertising;
 BeaconData_t data;
 HardwareSerial modbus(1);
+time_t currentHourMeter;
 // TODO: Declare Setting_t
 
 void setup()
 {
     /* SERIAL INIT */
     Serial.begin(9600);
-    Serial.println("Mesin dinyalakan");
+    Serial.println("[Serial] Mesin dinyalakan");
 
     /* RTC INIT */
-    Serial.println("Inisialisasi RTC");
+    Serial.println("[RTC] Inisialisasi RTC");
     rtc = new RTC();
+    if (rtc == nullptr)
+    {
+        Serial.println("[ERROR] Failed to allocate memory for RTC object, retrying in 5 seconds...");
+        vTaskDelay(pdMS_TO_TICKS(5000)); // Wait for 5 seconds before retrying
+    }
 
     /* ANALOG INPUT INIT */
-    Serial.println("Inisialisasi Analog Input");
+    Serial.println("[AIN] Inisialisasi Analog Input");
     ain = new AnalogInput();
     data.voltageSupply = ain->readAnalogInput(AnalogPin::PIN_A0); // untuk membaca di pin_a0 (PIN 1 pada silkscreen)
 
     /* GPS INIT */
-    Serial.println("Inisialisasi GPS");
+    Serial.println("[GPS] Inisialisasi GPS");
     gps = new GPS();
     data.gps.latitude = 0;
     data.gps.longitude = 0;
     data.gps.status = 'A';
 
     /* RS485 INIT */
-    Serial.println("Inisialisasi RS485");
+    Serial.println("[485] Inisialisasi RS485");
     modbus.begin(9600, SERIAL_8N1, PIN_RX_RS485, PIN_TX_RS485);
 
     xSemaphore = xSemaphoreCreateBinary();
@@ -75,27 +82,17 @@ void setup()
     BLEDevice::setPower(ESP_PWR_LVL_N12);
     pAdvertising = BLEDevice::getAdvertising();
 
-    // TODO: HourMeter init
-    /* HOUR METER INIT */
-    //  declare HourMeter object
-    //  if saved settings exist,
-    //      load to currentTracking
-    //      currentHourMeter = savedHourMeter;
-    //      print to the console for debug
-    //  else
-    //      currentTracking value is default
-    //      print to the console for debug
+    hm = new HourMeter(currentHourMeter);
+    currentHourMeter = hm->loadHMFromStorage();
+    Serial.printf("[HM] Hour Meter yang tersimpan adalah %ld\n", currentHourMeter);
+    // TODO: Print juga hour meter dalam jam
 
-    xTaskCreatePinnedToCore(RTCDemo, "RTC Demo", 2048, NULL, 3, &RTCDemoHandler, 1); // TODO: Depreciating
-    xTaskCreatePinnedToCore(dataAcquisition, "Analog Demo", 4096, NULL, 3, &dataAcquisitionHandler, 1);
+    // xTaskCreatePinnedToCore(RTCDemo, "RTC Demo", 2048, NULL, 3, &RTCDemoHandler, 1); // TODO: Depreciating
+    xTaskCreatePinnedToCore(dataAcquisition, "Data Acquisition", 4096, NULL, 3, &dataAcquisitionHandler, 1);
     xTaskCreatePinnedToCore(sendBLEData, "Send BLE Data", 2048, NULL, 3, &sendBLEDataHandler, 0);
     xTaskCreatePinnedToCore(retrieveGPSData, "get GPS Data", 2048, NULL, 4, &retrieveGPSHandler, 1);
     xTaskCreatePinnedToCore(sendToRS485, "send data to RS485", 2048, NULL, 3, &sendToRS485Handler, 0);
-    // xTaskCreatePinnedToCore(countingHourMeter, "Updating Hour Meter", 2048, NULL, 3, &countingHMHandler, 1); // TODO: Impelement
-
-    // TODO: load HourMeter data from EEPROM
-    // currentHourMeter = savedHourMeter;
-    // then continue counting
+    xTaskCreatePinnedToCore(countingHourMeter, "Updating Hour Meter", 8192, NULL, 3, &countingHMHandler, 0);
 }
 
 void loop()
@@ -137,7 +134,7 @@ static void dataAcquisition(void *pvParam)
             Serial.printf("============================================\n");
 
             xSemaphoreGive(xSemaphore);
-            vTaskDelay(pdMS_TO_TICKS(100));
+            vTaskDelay(pdMS_TO_TICKS(1000));
         }
     }
 }
@@ -229,18 +226,18 @@ static void retrieveGPSData(void *pvParam)
 
         if ((gps->getCharProcessed()) < 10)
         {
-            Serial.println("GPS module not sending data, check wiring or module power");
+            Serial.println("[GPS] GPS module not sending data, check wiring or module power");
         }
         else
         {
             if (isValid)
             {
-                Serial.printf("Latitude : %f", data.gps.longitude);
-                Serial.printf("Longitude : %f", data.gps.longitude);
+                Serial.printf("[GPS] Latitude : %f", data.gps.longitude);
+                Serial.printf("[GPS] Longitude : %f", data.gps.longitude);
             }
             else
             {
-                Serial.println("GPS is searching for a signal...");
+                Serial.println("[GPS] GPS is searching for a signal...");
             }
         }
 
@@ -278,10 +275,28 @@ static void serialConfig(void *pvParam)
 
 static void countingHourMeter(void *pvParam)
 {
+    Serial.println("[DEBUG] BARU MULAI COUNTING HOUR METER");
+    DateTime startTime = rtc->now();
+    Serial.printf("[HM] Start Time : \n");
+
+    DateTime pollingTime;
+    time_t runHour, totalRunHour;
+
+    // time_t currentHourMeter = 900;
     while (1)
     {
-        // TODO: Start the tick from RTC
-        // TODO: update the currentHourMeters tick
+        pollingTime = rtc->now();
+
+        // Serial.printf("Polling Time: %ld s, Start Time: %lu s\n", pollingTime.secondstime(), startTime.secondstime());
+
+        runHour = static_cast<time_t>(pollingTime.secondstime()) - static_cast<time_t>(startTime.secondstime());
+        // BUG: this printf gives me big number. but the totalRunHour is right
+        // Serial.printf("[HM] run Hour : %lu s\n"); 
+
+        totalRunHour = currentHourMeter + runHour;
+        Serial.printf("[HM] this machine has running hour of %ld s\n", totalRunHour);
         // TODO: save to eeprom
+
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
