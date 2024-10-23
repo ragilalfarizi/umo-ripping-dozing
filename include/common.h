@@ -2,33 +2,28 @@
 
 #include <Arduino.h>
 
-// struct GPSData_s
-// {
-//     uint32_t lon_i_g;
-//     uint32_t lat_i_g; // integer global
-//     double lon_f_g; // float global
-//     double lat_f_g;
-//     bool lonValueNegative;
-//     bool latValueNegative;
-//     char GPSStatus;
-// };
+#define PIN_RX_RS485 18
+#define PIN_TX_RS485 19
 
 // New Way
-struct GPSData_s
+struct GPSData_t
 {
-    // uint32_t lon_i_g;
-    // uint32_t lat_i_g;
-    // double lon_f_g;
-    // double lat_f_g;
     double longitude;
     double latitude;
-    // bool lonValueNegative;
-    // bool latValueNegative;
     char status;
 };
 
 struct BeaconData_t {
-    GPSData_s gps;
+    GPSData_t gps;
     float voltageSupply;
     time_t hourMeter;
+};
+
+struct Setting_t
+{
+    // TODO: Adjust the type data
+    int32_t settingDevice;
+    int32_t voltageThreshold;
+    int32_t codeUnit;
+    int32_t offsetThreshold;
 };
