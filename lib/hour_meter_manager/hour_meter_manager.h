@@ -2,16 +2,19 @@
 
 #include <Arduino.h>
 #include <EEPROM.h>
+#include <LittleFS.h>
 #include "common.h"
 #include <rtc.h>
 
+// WARN: DEPRECIATED
 #define STORAGE_ADDRESS_HOUR_METER 0 // Size of Hour Meter is 4 bytes
 #define STORAGE_ADDRESS_SETTINGS 4   // Size of Settings is 4 * 4 bytes
+#define FORMAT_LITTLEFS_IF_FAILED true
 
 class HourMeter
 {
 public:
-    HourMeter(time_t& currentHourMeter, uint16_t storageSize = 512);
+    HourMeter(uint8_t format_on_fail = FORMAT_LITTLEFS_IF_FAILED);
     ~HourMeter();
 
     int32_t getSavedHourMeter();
@@ -32,7 +35,7 @@ public:
     void resetHourMeter();
 
 private:
-    time_t savedHourMeter; // currently not used
+    void checkAndCreateFiles();
 };
 
 template <typename T>
@@ -40,11 +43,22 @@ bool HourMeter::saveToStorage(const T &data)
 {
     if (std::is_same<T, time_t>::value)
     {
-        EEPROM.put(STORAGE_ADDRESS_HOUR_METER, data);
-        savedHourMeter =+ data;
+        // EEPROM.put(STORAGE_ADDRESS_HOUR_METER, data);
 
-        Serial.printf("Now Your hour meter is %u\n", savedHourMeter);
+        FILE *file = fopen("/littlefs/data.txt", "w");
+        if (file)
+        {
+            // Write the latest value in JSON format
+            fprintf(file, "%ld", data);
+            fclose(file);
+        }
+        else
+        {
+            Serial.println("Failed to open data.txt for writing");
+            return false;
+        }
     }
+
     else if (std::is_same<T, Setting_t>::value)
     {
         EEPROM.put(STORAGE_ADDRESS_SETTINGS, data);
@@ -54,7 +68,7 @@ bool HourMeter::saveToStorage(const T &data)
         return false;
     }
 
-    EEPROM.commit();
+    // EEPROM.commit();
 
     return true;
 }

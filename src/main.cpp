@@ -82,6 +82,7 @@ void setup()
     BLEDevice::setPower(ESP_PWR_LVL_N12);
     pAdvertising = BLEDevice::getAdvertising();
 
+    /* HOUR METER INIT */
     hm = new HourMeter(currentHourMeter);
     currentHourMeter = hm->loadHMFromStorage();
     Serial.printf("[HM] Hour Meter yang tersimpan adalah %ld\n", currentHourMeter);
@@ -275,7 +276,6 @@ static void serialConfig(void *pvParam)
 
 static void countingHourMeter(void *pvParam)
 {
-    Serial.println("[DEBUG] BARU MULAI COUNTING HOUR METER");
     DateTime startTime = rtc->now();
     Serial.printf("[HM] Start Time : \n");
 
@@ -291,10 +291,19 @@ static void countingHourMeter(void *pvParam)
 
         runHour = static_cast<time_t>(pollingTime.secondstime()) - static_cast<time_t>(startTime.secondstime());
         // BUG: this printf gives me big number. but the totalRunHour is right
-        // Serial.printf("[HM] run Hour : %lu s\n"); 
+        // Serial.printf("[HM] run Hour : %lu s\n");
 
         totalRunHour = currentHourMeter + runHour;
         Serial.printf("[HM] this machine has running hour of %ld s\n", totalRunHour);
+
+        if (hm->saveToStorage(totalRunHour))
+        {
+            Serial.println("[HM] total run hour is saved to storage");
+        }
+        else
+        {
+            Serial.println("[HM] total run hour is failed to be saved");
+        }
         // TODO: save to eeprom
 
         vTaskDelay(pdMS_TO_TICKS(1000));
