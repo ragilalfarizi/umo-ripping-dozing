@@ -304,7 +304,6 @@ static void countingHourMeter(void *pvParam)
         {
             Serial.println("[HM] total run hour is failed to be saved");
         }
-        // TODO: save to eeprom
 
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
