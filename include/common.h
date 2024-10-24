@@ -26,7 +26,8 @@ struct DozerData_t
     bool dozingStatus;
     time_t dozingHourMeter;
     std::string ID;       // maybe refactor this in the future
-    DateTime currentTime; // maybe change to string
+    std::string currentDate;
+    std::string currentTime;
 };
 
 struct Setting_t

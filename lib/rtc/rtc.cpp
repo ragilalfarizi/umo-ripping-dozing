@@ -24,16 +24,36 @@ RTC::RTC()
         // January 21, 2014 at 3am you would call:
         // rtc.adjust(DateTime(2014, 1, 21, 3, 0, 0));
     }
-
-    startTime = now();
-
 }
 
 RTC::~RTC()
 {
 }
 
-void RTC::printRTCData()
+std::string RTC::getCurrentDateString(DateTime &time)
+{
+    std::string dateString, day, month, year;
+
+    day = std::to_string(time.day());
+    month = std::to_string(time.month());
+    year = std::to_string(time.year());
+
+    dateString = day + "/" + month + "/" + year;
+    return dateString;
+}
+
+std::string RTC::getCurrentTimeString(DateTime &time)
+{
+    std::string timeString, hour, minute;
+
+    hour = std::to_string(time.hour());
+    minute = std::to_string(time.minute());
+
+    timeString = hour + ":" + minute;
+    return timeString;
+}
+
+void RTC::printRTCData(DateTime &startTime)
 {
     Serial.print(startTime.year(), DEC);
     Serial.print('/');

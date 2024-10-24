@@ -17,7 +17,6 @@ AnalogInput *ain;
 HourMeter *alternator;
 HourMeter *ripping;
 HourMeter *dozing;
-// GPS *gps;
 
 /* FORWARD DECLARATION UNTUK FUNGSI-FUNGSI DI DEPAN*/
 static void getTimeAndDate(void *pvParam);
@@ -27,12 +26,6 @@ static void rippingCounter(void *pvParam);
 static void dozingCounter(void *pvParam);
 void IRAM_ATTR onDI3Change();
 void IRAM_ATTR onDI4Change();
-// static void dataAcquisition(void *pvParam);
-// static void sendBLEData(void *pvParam);
-// static void retrieveGPSData(void *pvParam);
-// static void countingHourMeter(void *pvParam);
-// static void serialConfig(void *pvParam);
-// static void setCustomBeacon();
 
 /* FORWARD DECLARATION UNTUK HANDLER DAN SEMAPHORE RTOS */
 TaskHandle_t getDateHandler = NULL;
@@ -40,17 +33,11 @@ TaskHandle_t displayComHandler = NULL;
 TaskHandle_t alternatorCounterHandler = NULL;
 TaskHandle_t rippingCounterHandler = NULL;
 TaskHandle_t dozingCounterHandler = NULL;
-// TaskHandle_t RTCDemoHandler = NULL;
-// TaskHandle_t dataAcquisitionHandler = NULL;
-// TaskHandle_t sendBLEDataHandler = NULL;
-// TaskHandle_t retrieveGPSHandler = NULL;
-// SemaphoreHandle_t xSemaphore = NULL;
 
 /* GLOBAL VARIABLES */
 HardwareSerial modbus(1);
 DozerData_t data;
-// BLEAdvertising *pAdvertising;
-// BeaconData_t data;
+DateTime now;
 // TODO: Declare Setting_t
 
 void setup()
@@ -68,23 +55,26 @@ void setup()
         vTaskDelay(pdMS_TO_TICKS(5000)); // Wait for 5 seconds before retrying
     }
 
+    if (rtc->lostPower())
+    {
+        Serial.println("RTC lost power, let's set the time!");
+        // When time needs to be set on a new device, or after a power loss, the
+        // following line sets the RTC to the date & time this sketch was compiled
+        rtc->adjust(DateTime(F(__DATE__), F(__TIME__)));
+        // This line sets the RTC with an explicit date & time, for example to set
+        // January 21, 2014 at 3am you would call:
+        // rtc.adjust(DateTime(2014, 1, 21, 3, 0, 0));
+    }
+
     /* ANALOG INPUT FOR ALTERNATOR INIT */
     Serial.println("[AIN] Inisialisasi Analog Input");
     ain = new AnalogInput();
     data.alternatorHourMeter = ain->readAnalogInput(AnalogPin::PIN_A3); // untuk membaca di pin_a3 (PIN 4 pada silkscreen)
     // TODO: Check alternator status
 
-    /* GPS INIT */
-    // Serial.println("[GPS] Inisialisasi GPS");
-    // gps = new GPS();
-    // data.gps.latitude = 0;
-    // data.gps.longitude = 0;
-    // data.gps.status = 'A';
-
-    /* RS485 INIT */
-    // TODO: ganti jadi display com
-    Serial.println("[485] Inisialisasi RS485");
-    modbus.begin(9600, SERIAL_8N1, PIN_RX_RS485, PIN_TX_RS485);
+    /* DIGITAL INPUT FOR RIPPING AND DOZING INIT */
+    // TODO: set to input
+    // TODO: attach interrupt
 
     /* BLE INIT */
     // BLEDevice::init("OMU BLE BEACON");
@@ -105,11 +95,20 @@ void setup()
     Serial.printf("[HM] Hour Meter dozing yang tersimpan adalah %ld\n", data.dozingHourMeter);
     // TODO: Print juga hour meter dalam jam
 
+    // LOAD DEVICE ID
+    // Ssementara hard-code dulu
+    data.ID = "CD001";
+
+    /* DISPLAY COM INIT */
+    // TODO: ganti jadi display com
+    Serial.println("[485] Inisialisasi RS485");
+    modbus.begin(9600, SERIAL_8N1, PIN_RX_RS485, PIN_TX_RS485);
+
+    // xTaskCreatePinnedToCore(alternatorCounter, "Updating Alternator Hour Meter", 2048, NULL, 3, &alternatorCounterHandler, 0);
+    // xTaskCreatePinnedToCore(rippingCounter, "Updating Ripping Hour Meter", 2048, NULL, 3, &rippingCounterHandler, 0);
+    // xTaskCreatePinnedToCore(dozingCounter, "Updating Dozing Hour Meter", 2048, NULL, 3, &dozingCounterHandler, 0);
+    // xTaskCreatePinnedToCore(sendToDisplay, "send data to Display", 2048, NULL, 3, &displayComHandler, 0);
     xTaskCreatePinnedToCore(getTimeAndDate, "get time and date", 2048, NULL, 3, &getDateHandler, 0);
-    xTaskCreatePinnedToCore(sendToDisplay, "send data to Display", 2048, NULL, 3, &displayComHandler, 0);
-    xTaskCreatePinnedToCore(alternatorCounter, "Updating Alternator Hour Meter", 2048, NULL, 3, &alternatorCounterHandler, 0);
-    xTaskCreatePinnedToCore(rippingCounter, "Updating Ripping Hour Meter", 2048, NULL, 3, &rippingCounterHandler, 0);
-    xTaskCreatePinnedToCore(dozingCounter, "Updating Dozing Hour Meter", 2048, NULL, 3, &dozingCounterHandler, 0);
     // xTaskCreatePinnedToCore(sendBLEData, "Send BLE Data", 2048, NULL, 3, &sendBLEDataHandler, 0);
     // xTaskCreatePinnedToCore(retrieveGPSData, "get GPS Data", 2048, NULL, 4, &retrieveGPSHandler, 1);
 }
@@ -120,11 +119,20 @@ void loop()
 
 static void getTimeAndDate(void *pvParam)
 {
-    // TODO:
-    // while(1)
-    //      getCurrentTimeAndDate();
-    //      assign to data.currentTime;
-    //      delay for 1 minute;
+    DateTime date;
+
+    while (1)
+    {
+        date = rtc->now();
+
+        data.currentTime = rtc->getCurrentTimeString(date);
+        data.currentDate = rtc->getCurrentDateString(date);
+
+        Serial.printf("[TIME] Date : %s\n", data.currentDate.c_str());
+        Serial.printf("[TIME] Time : %s\n", data.currentTime.c_str());
+
+        vTaskDelay(pdMS_TO_TICKS(60 * 1000)); // delay for one minute
+    }
 }
 
 static void sendToDisplay(void *pvParam)
@@ -135,7 +143,7 @@ static void sendToDisplay(void *pvParam)
     //      delay 1s
     while (1)
     {
-        modbus.printf("%c,%f,%f,%.2f", data.gps.status, data.gps.latitude, data.gps.longitude, data.voltageSupply);
+        // modbus.printf("%c,%f,%f,%.2f", data.gps.status, data.gps.latitude, data.gps.longitude, data.voltageSupply);
 
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
@@ -193,111 +201,9 @@ void IRAM_ATTR onDI4Change()
     //      vTaskResume()
 }
 
-// static void setCustomBeacon()
-// {
-//     // atur data advertising
-//     BLEAdvertisementData oAdvertisementData = BLEAdvertisementData();
-//     BLEAdvertisementData oScanResponseData = BLEAdvertisementData();
-
-//     const uint16_t beaconUUID = 0xFEAA;
-//     oScanResponseData.setFlags(0x06); // GENERAL_DISC_MODE 0x02 | BR_EDR_NOT_SUPPORTED 0x04
-//     oScanResponseData.setCompleteServices(BLEUUID(beaconUUID));
-
-//     // uint16_t voltage = random(2800, 3700); // dalam millivolts
-//     // analogInputVal = ain->readAnalogInput(AnalogPin::PIN_A1);
-//     // float current = 1.5;             // dalam ampere
-//     // uint32_t timestamp = 1678801234; // contoh Unix TimeStamp
-
-//     // Convert current to a 16-bit fixed-point format (e.g., 1.5 A -> 384 in 8.8 format)
-//     // Konversi arus ke format (contoh: 1.5 A -> 384 di format 8.8)
-//     // int16_t currentFixedPoint = (int16_t)(current * 256);
-//     // int16_t analogInputFixedPoint = (int16_t)(analogInputVal * 256);
-
-//     /* PROCESSING DATA SEBELUM DIKIRIM MELALUI BLE */
-//     char beacon_data[15];
-//     uint16_t volt = data.voltageSupply * 1000; // 3300mV = 3.3V
-//     int32_t latitudeFixedPoint = (int32_t)(data.gps.latitude * 256);
-//     int32_t longitudeFixedPoint = (int32_t)(data.gps.longitude * 256);
-
-//     beacon_data[0] = 0x01; // Eddystone Frame Type (Unencrypted Eddystone-TLM)
-//     beacon_data[1] = 0x00; // TLM version
-//     beacon_data[2] = 0x01;
-//     beacon_data[3] = (volt >> 8);                                // Battery voltage, 1 mV/bit i.e. 0xCE4 = 3300mV = 3.3V
-//     beacon_data[4] = (volt & 0xFF);                              //
-//     beacon_data[5] = 0;                                          // Eddystone Frame Type (Unencrypted Eddystone-TLM)
-//     beacon_data[6] = data.gps.status;                            //
-//     beacon_data[7] = ((longitudeFixedPoint & 0xFF000000) >> 24); //
-//     beacon_data[8] = ((longitudeFixedPoint & 0xFF0000) >> 16);   //
-//     beacon_data[9] = ((longitudeFixedPoint & 0xFF00) >> 8);      //
-//     beacon_data[10] = (longitudeFixedPoint & 0xFF);              //
-//     beacon_data[11] = ((latitudeFixedPoint & 0xFF000000) >> 24); //
-//     beacon_data[12] = ((latitudeFixedPoint & 0xFF0000) >> 16);   //
-//     beacon_data[13] = ((latitudeFixedPoint & 0xFF00) >> 8);      //
-//     beacon_data[14] = (latitudeFixedPoint & 0xFF);               //
-//     // beacon_data[15] = (((lastTenth / 10) & 0xFF000000) >> 24);    //
-//     // beacon_data[16] = (((lastTenth / 10) & 0xFF0000) >> 16);      //
-//     // beacon_data[17] = (((lastTenth / 10) & 0xFF00) >> 8);         //
-//     // beacon_data[18] = ((lastTenth / 10) & 0xFF);                  //
-
-//     oScanResponseData.setServiceData(BLEUUID(beaconUUID), std::string(beacon_data, sizeof(beacon_data)));
-//     oAdvertisementData.setName("OMU Demo Data");
-//     pAdvertising->setAdvertisementData(oAdvertisementData);
-//     pAdvertising->setScanResponseData(oScanResponseData);
-// }
-
-// static void sendBLEData(void *pvParam)
-// {
-
-//     while (1)
-//     {
-//         setCustomBeacon();
-//         pAdvertising->start();
-//         Serial.println("[BLE] Advertising...");
-//         vTaskDelay(pdMS_TO_TICKS(1000));
-//     }
-// }
-
-/**
- * WARNING: Haven't fully tested. It should be working.
- *          But when I tested it, it took too long to retreive
- *          GPS Data.
- * */
-// static void retrieveGPSData(void *pvParam)
-// {
-//     bool isValid = false;
-
-//     while (1) // void loop
-//     {
-//         Serial.println("[GPS] encoding...");
-
-//         while (Serial.available() > 0)
-//         {
-//             char gpsChar = Serial.read();
-//             gps->encode(gpsChar);
-//         }
-
-//         isValid = gps->getValidation();
-
-//         if ((gps->getCharProcessed()) < 10)
-//         {
-//             Serial.println("[GPS] GPS module not sending data, check wiring or module power");
-//         }
-//         else
-//         {
-//             if (isValid)
-//             {
-//                 Serial.printf("[GPS] Latitude : %f", data.gps.longitude);
-//                 Serial.printf("[GPS] Longitude : %f", data.gps.longitude);
-//             }
-//             else
-//             {
-//                 Serial.println("[GPS] GPS is searching for a signal...");
-//             }
-//         }
-
-//         vTaskDelay(pdMS_TO_TICKS(2000));
-//     }
-// }
+/*==========================================================================*/
+/* DEPRECIATED FUNCTIONS. MIGHT BE USED IN THE FUTURE */
+/*==========================================================================*/
 
 /**
  * @brief   : Task to receive new config and update them.
