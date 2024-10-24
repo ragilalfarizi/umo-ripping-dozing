@@ -1,11 +1,11 @@
 #include "hour_meter_manager.h"
 
-HourMeter::HourMeter(uint8_t format_on_fail)
+HourMeter::HourMeter(std::string fileName, uint8_t formatOnFail)
 {
-    if (LittleFS.begin(format_on_fail))
+    if (LittleFS.begin(formatOnFail))
     {
         Serial.printf("Storage has been allocated\n");
-        checkAndCreateFiles();
+        checkAndCreateFiles(fileName);
     }
     else
     {
@@ -17,63 +17,62 @@ HourMeter::~HourMeter()
 {
 }
 
-void HourMeter::checkAndCreateFiles()
+void HourMeter::checkAndCreateFiles(std::string fileName)
 {
+    std::string path = "/" + fileName;
+    std::string fullPath = "/littlefs/" + fileName;
+
     // Check and create data.txt
-    if (!LittleFS.exists("/data.txt"))
+    if (!LittleFS.exists(path.c_str()))
     {
         // Create data.txt and write initial value
-        File file = LittleFS.open("/littlefs/data.txt", "w"); // Open for writing (creates if not exists)
+        File file = LittleFS.open(fullPath.c_str(), "w"); // Open for writing (creates if not exists)
         if (file)
         {
             file.println("0"); // Write initial value
             file.close();      // Close the file
-            Serial.println("Created data.txt with initial value 0");
+            Serial.printf("Created %s with initial value 0\n", path.c_str());
         }
         else
         {
-            Serial.println("Failed to create data.txt");
+            Serial.printf("Failed to create %s\n", path.c_str());
         }
     }
     else
     {
-        Serial.println("data.txt already exists");
+        Serial.printf("%s already exists\n", path.c_str());
     }
 
     // Check and create setting.txt
-    if (!LittleFS.exists("/setting.txt"))
-    {
-        // Create setting.txt and write initial value
-        File file = LittleFS.open("/littlefs/setting.txt", "w"); // Open for writing (creates if not exists)
-        if (file)
-        {
-            file.println("0"); // Write initial value
-            file.close();      // Close the file
-            Serial.println("Created setting.txt with initial value 0");
-        }
-        else
-        {
-            Serial.println("Failed to create setting.txt");
-        }
-    }
-    else
-    {
-        Serial.println("setting.txt already exists");
-    }
+    // if (!LittleFS.exists("/setting.txt"))
+    // {
+    //     // Create setting.txt and write initial value
+    //     File file = LittleFS.open("/littlefs/setting.txt", "w"); // Open for writing (creates if not exists)
+    //     if (file)
+    //     {
+    //         file.println("0"); // Write initial value
+    //         file.close();      // Close the file
+    //         Serial.println("Created setting.txt with initial value 0");
+    //     }
+    //     else
+    //     {
+    //         Serial.println("Failed to create setting.txt");
+    //     }
+    // }
+    // else
+    // {
+    //     Serial.println("setting.txt already exists");
+    // }
 }
 
-// int32_t HourMeter::getSavedHourMeter()
-// {
-//     return savedHourMeter;
-// }
-
-time_t HourMeter::loadHMFromStorage()
+time_t HourMeter::loadHMFromStorage(std::string path)
 {
     time_t hourMeter;
+
+    std::string fullPath = "/littlefs/" + path;
     // EEPROM.get(STORAGE_ADDRESS_HOUR_METER, hourMeter);
 
-    Serial.println("about to open data.txt");
-    FILE *file = fopen("/littlefs/data.txt", "r");
+    FILE *file = fopen(fullPath.c_str(), "r");
     if (file)
     {
         fscanf(file, "%ld", &hourMeter); // Read a single float value
@@ -81,7 +80,7 @@ time_t HourMeter::loadHMFromStorage()
     }
     else
     {
-        Serial.println("Failed to open data.txt for reading");
+        Serial.printf("Failed to open %s for reading\n", fullPath.c_str());
     }
 
     return hourMeter;
@@ -91,4 +90,14 @@ Setting_t HourMeter::loadSettingFromStorage()
 {
     Setting_t dummy{-1};
     return dummy;
+}
+
+time_t convertHMToHourFormat(time_t seconds)
+{
+    return seconds / 3600;
+}
+
+time_t convertHMToMinuteFormat(time_t seconds)
+{
+    return seconds / 60;
 }

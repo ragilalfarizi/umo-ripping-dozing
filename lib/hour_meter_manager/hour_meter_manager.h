@@ -14,7 +14,8 @@
 class HourMeter
 {
 public:
-    HourMeter(uint8_t format_on_fail = FORMAT_LITTLEFS_IF_FAILED);
+    HourMeter(std::string fileName = "data.txt", uint8_t formatOnFail = FORMAT_LITTLEFS_IF_FAILED);
+
     ~HourMeter();
 
     int32_t getSavedHourMeter();
@@ -22,20 +23,20 @@ public:
     template <typename T>
     bool saveToStorage(const T &data);
 
-    time_t loadHMFromStorage();
+    time_t loadHMFromStorage(std::string path = "data.txt");
 
     Setting_t loadSettingFromStorage();
 
     void printStorage();
 
-    DateTime convertHMToHourFormat(DateTime seconds);
+    time_t convertHMToHourFormat(time_t seconds);
 
-    DateTime convertHMToMinuteFormat(DateTime seconds);
+    time_t convertHMToMinuteFormat(time_t seconds);
 
     void resetHourMeter();
 
 private:
-    void checkAndCreateFiles();
+    void checkAndCreateFiles(std::string fileName);
 };
 
 template <typename T>

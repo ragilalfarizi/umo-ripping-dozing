@@ -26,6 +26,7 @@ static void rippingCounter(void *pvParam);
 static void dozingCounter(void *pvParam);
 void IRAM_ATTR onDI3Change();
 void IRAM_ATTR onDI4Change();
+static void digitalInputInit();
 
 /* FORWARD DECLARATION UNTUK HANDLER DAN SEMAPHORE RTOS */
 TaskHandle_t getDateHandler = NULL;
@@ -74,6 +75,7 @@ void setup()
 
     /* DIGITAL INPUT FOR RIPPING AND DOZING INIT */
     // TODO: set to input
+    digitalInputInit();
     // TODO: attach interrupt
 
     /* BLE INIT */
@@ -82,18 +84,18 @@ void setup()
     // pAdvertising = BLEDevice::getAdvertising();
 
     /* HOUR METER INIT */
-    alternator = new HourMeter();
-    data.alternatorHourMeter = alternator->loadHMFromStorage();
+    alternator = new HourMeter("alternator.txt");
+    data.alternatorHourMeter = alternator->loadHMFromStorage("alternator.txt");
     Serial.printf("[HM] Hour Meter ALTERNATOR yang tersimpan adalah %ld\n", data.alternatorHourMeter);
 
-    ripping = new HourMeter();
-    data.rippingHourMeter = ripping->loadHMFromStorage();
+    ripping = new HourMeter("ripping.txt");
+    data.rippingHourMeter = ripping->loadHMFromStorage("ripping.txt");
     Serial.printf("[HM] Hour Meter RIPPING yang tersimpan adalah %ld\n", data.rippingHourMeter);
 
-    dozing = new HourMeter();
-    data.dozingHourMeter = dozing->loadHMFromStorage();
-    Serial.printf("[HM] Hour Meter dozing yang tersimpan adalah %ld\n", data.dozingHourMeter);
-    // TODO: Print juga hour meter dalam jam
+    dozing = new HourMeter("dozing.txt");
+    data.dozingHourMeter = dozing->loadHMFromStorage("dozing.txt");
+    Serial.printf("[HM] Hour Meter DOZING yang tersimpan adalah %ld\n", data.dozingHourMeter);
+    //TODO: Print juga hour meter dalam jam
 
     // LOAD DEVICE ID
     // Ssementara hard-code dulu
@@ -105,10 +107,10 @@ void setup()
     modbus.begin(9600, SERIAL_8N1, PIN_RX_RS485, PIN_TX_RS485);
 
     // xTaskCreatePinnedToCore(alternatorCounter, "Updating Alternator Hour Meter", 2048, NULL, 3, &alternatorCounterHandler, 0);
-    // xTaskCreatePinnedToCore(rippingCounter, "Updating Ripping Hour Meter", 2048, NULL, 3, &rippingCounterHandler, 0);
-    // xTaskCreatePinnedToCore(dozingCounter, "Updating Dozing Hour Meter", 2048, NULL, 3, &dozingCounterHandler, 0);
+    xTaskCreatePinnedToCore(rippingCounter, "Updating Ripping Hour Meter", 2048, NULL, 2, &rippingCounterHandler, 0);
+    xTaskCreatePinnedToCore(dozingCounter, "Updating Dozing Hour Meter", 2048, NULL, 2, &dozingCounterHandler, 0);
     // xTaskCreatePinnedToCore(sendToDisplay, "send data to Display", 2048, NULL, 3, &displayComHandler, 0);
-    xTaskCreatePinnedToCore(getTimeAndDate, "get time and date", 2048, NULL, 3, &getDateHandler, 0);
+    xTaskCreatePinnedToCore(getTimeAndDate, "get time and date", 2048, NULL, 1, &getDateHandler, 0);
     // xTaskCreatePinnedToCore(sendBLEData, "Send BLE Data", 2048, NULL, 3, &sendBLEDataHandler, 0);
     // xTaskCreatePinnedToCore(retrieveGPSData, "get GPS Data", 2048, NULL, 4, &retrieveGPSHandler, 1);
 }
@@ -161,12 +163,20 @@ static void alternatorCounter(void *pvParam)
 
 static void rippingCounter(void *pvParam)
 {
-    // TODO:
-    // this whole things start/stop by an interrupt
-    // while(1)
-    //      startcouting()
-    //      savecounting()
-    //      delay 1s
+    while (1)
+    {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+        while (digitalRead(PIN_DIGITAL_IN_3) == LOW)
+        {
+            Serial.println("Hello dari rippingCounter");
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+
+        Serial.println("Stop dari rippingCounter");
+
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
 }
 
 static void dozingCounter(void *pvParam)
@@ -177,28 +187,54 @@ static void dozingCounter(void *pvParam)
     //      startcouting()
     //      savecounting()
     //      delay 1s
+
+    while (1)
+    {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+        while (digitalRead(PIN_DIGITAL_IN_4) == LOW)
+        {
+            Serial.println("Hello dari dozingCounter");
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+
+        Serial.println("Stop dari dozingCounter");
+
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
 }
 
 void IRAM_ATTR onDI3Change()
 {
-    // TODO:
-    // if (digitalRead(PIN3) == LOW) //artinya aktif
-    //      data.rippingStatus = ON
-    //      vTaskResume()
-    // else
-    //      data.rippingStatus = OFF
-    //      vTaskResume()
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
+    xTaskNotifyFromISR(rippingCounterHandler, 0, eNoAction, &xHigherPriorityTaskWoken);
+
+    if (xHigherPriorityTaskWoken == pdTRUE)
+    {
+        portYIELD_FROM_ISR();
+    }
 }
 
 void IRAM_ATTR onDI4Change()
 {
-    // TODO:
-    // if (digitalRead(PIN4) == LOW) //artinya aktif
-    //      data.rippingStatus = ON
-    //      vTaskResume()
-    // else
-    //      data.rippingStatus = OFF
-    //      vTaskResume()
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
+    xTaskNotifyFromISR(dozingCounterHandler, 0, eNoAction, &xHigherPriorityTaskWoken);
+
+    if (xHigherPriorityTaskWoken == pdTRUE)
+    {
+        portYIELD_FROM_ISR();
+    }
+}
+
+void digitalInputInit()
+{
+    pinMode(PIN_DIGITAL_IN_3, INPUT);
+    pinMode(PIN_DIGITAL_IN_4, INPUT);
+
+    attachInterrupt(digitalPinToInterrupt(PIN_DIGITAL_IN_3), onDI3Change, FALLING);
+    attachInterrupt(digitalPinToInterrupt(PIN_DIGITAL_IN_4), onDI4Change, FALLING);
 }
 
 /*==========================================================================*/
