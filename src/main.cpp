@@ -95,10 +95,10 @@ void setup()
     dozing = new HourMeter("dozing.txt");
     data.dozingHourMeter = dozing->loadHMFromStorage("dozing.txt");
     Serial.printf("[HM] Hour Meter DOZING yang tersimpan adalah %ld\n", data.dozingHourMeter);
-    //TODO: Print juga hour meter dalam jam
+    // TODO: Print juga hour meter dalam jam
 
     // LOAD DEVICE ID
-    // Ssementara hard-code dulu
+    // Sementara hard-code dulu
     data.ID = "CD001";
 
     /* DISPLAY COM INIT */
@@ -107,9 +107,9 @@ void setup()
     modbus.begin(9600, SERIAL_8N1, PIN_RX_RS485, PIN_TX_RS485);
 
     // xTaskCreatePinnedToCore(alternatorCounter, "Updating Alternator Hour Meter", 2048, NULL, 3, &alternatorCounterHandler, 0);
-    xTaskCreatePinnedToCore(rippingCounter, "Updating Ripping Hour Meter", 2048, NULL, 2, &rippingCounterHandler, 0);
-    xTaskCreatePinnedToCore(dozingCounter, "Updating Dozing Hour Meter", 2048, NULL, 2, &dozingCounterHandler, 0);
-    // xTaskCreatePinnedToCore(sendToDisplay, "send data to Display", 2048, NULL, 3, &displayComHandler, 0);
+    xTaskCreatePinnedToCore(rippingCounter, "Updating Ripping Hour Meter", 4096, NULL, 2, &rippingCounterHandler, 0);
+    xTaskCreatePinnedToCore(dozingCounter, "Updating Dozing Hour Meter", 4096, NULL, 2, &dozingCounterHandler, 0);
+    // xTaskCreatePinnedToCore(sendToDisplay, "send data to Display", 2048, NULL0, 3, &displayComHandler, 0);
     xTaskCreatePinnedToCore(getTimeAndDate, "get time and date", 2048, NULL, 1, &getDateHandler, 0);
     // xTaskCreatePinnedToCore(sendBLEData, "Send BLE Data", 2048, NULL, 3, &sendBLEDataHandler, 0);
     // xTaskCreatePinnedToCore(retrieveGPSData, "get GPS Data", 2048, NULL, 4, &retrieveGPSHandler, 1);
@@ -129,6 +129,8 @@ static void getTimeAndDate(void *pvParam)
 
         data.currentTime = rtc->getCurrentTimeString(date);
         data.currentDate = rtc->getCurrentDateString(date);
+
+        // sprintf(data.currentTime, )
 
         Serial.printf("[TIME] Date : %s\n", data.currentDate.c_str());
         Serial.printf("[TIME] Time : %s\n", data.currentTime.c_str());
@@ -163,17 +165,43 @@ static void alternatorCounter(void *pvParam)
 
 static void rippingCounter(void *pvParam)
 {
+    DateTime startTime, pollingTime;
+    time_t runHour = 0;
+
     while (1)
     {
+        // Menunggu notifikasi dari interrupt digital input 3
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+        startTime = rtc->now(); // Ambil data waktu mulai
+        Serial.printf("[HM] Ripping Counter start at %02d:%02d:%02d\n", startTime.hour(), startTime.minute(), startTime.second());
 
         while (digitalRead(PIN_DIGITAL_IN_3) == LOW)
         {
-            Serial.println("Hello dari rippingCounter");
+            pollingTime = rtc->now();
+
+            // Kalkulasi selisih polling dan start time
+            runHour = static_cast<time_t>(pollingTime.secondstime() - startTime.secondstime());
+
+            data.rippingHourMeter += runHour;
+            Serial.printf("[HM] The total ripping hour : %ld s\n", data.rippingHourMeter);
+
+            // Menyimpan ke Storage
+            if (ripping->saveToStorage(data.rippingHourMeter, "ripping.txt"))
+            {
+                Serial.println("[HM] total ripping hour is saved");
+            }
+            else
+            {
+                Serial.println("[HM] total ripping hour is failed to be saved");
+            }
+
+            startTime = pollingTime; // Update start time
+
             vTaskDelay(pdMS_TO_TICKS(1000));
         }
 
-        Serial.println("Stop dari rippingCounter");
+        Serial.println("[HM] rippingCounter is stopped");
 
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
@@ -181,24 +209,43 @@ static void rippingCounter(void *pvParam)
 
 static void dozingCounter(void *pvParam)
 {
-    // TODO:
-    // this whole things start/stop by an interrupt
-    // while(1)
-    //      startcouting()
-    //      savecounting()
-    //      delay 1s
+    DateTime startTime, pollingTime;
+    time_t runHour = 0;
 
     while (1)
     {
+        // Menunggu notifikasi dari interrupt digital input 3
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+        startTime = rtc->now(); // Ambil data waktu mulai
+        Serial.printf("[HM] Dozing Counter start at %02d:%02d:%02d\n", startTime.hour(), startTime.minute(), startTime.second());
 
         while (digitalRead(PIN_DIGITAL_IN_4) == LOW)
         {
-            Serial.println("Hello dari dozingCounter");
+            pollingTime = rtc->now();
+
+            // Kalkulasi selisih polling dan start time
+            runHour = static_cast<time_t>(pollingTime.secondstime() - startTime.secondstime());
+
+            data.dozingHourMeter += runHour;
+            Serial.printf("[HM] The total dozing hour : %ld s\n", data.dozingHourMeter);
+
+            // Menyimpan ke Storage
+            if (ripping->saveToStorage(data.dozingHourMeter, "dozing.txt"))
+            {
+                Serial.println("[HM] total dozing hour is saved");
+            }
+            else
+            {
+                Serial.println("[HM] total dozing hour is failed to be saved");
+            }
+
+            startTime = pollingTime; // Update start time
+
             vTaskDelay(pdMS_TO_TICKS(1000));
         }
 
-        Serial.println("Stop dari dozingCounter");
+        Serial.println("[HM] dozingCounter is stopped");
 
         vTaskDelay(pdMS_TO_TICKS(1000));
     }

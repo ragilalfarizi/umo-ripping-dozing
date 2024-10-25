@@ -21,7 +21,7 @@ public:
     int32_t getSavedHourMeter();
 
     template <typename T>
-    bool saveToStorage(const T &data);
+    bool saveToStorage(const T &data, std::string path);
 
     time_t loadHMFromStorage(std::string path = "data.txt");
 
@@ -40,22 +40,22 @@ private:
 };
 
 template <typename T>
-bool HourMeter::saveToStorage(const T &data)
+bool HourMeter::saveToStorage(const T &data, std::string path)
 {
+    std::string fullPath = "/" + path;
+
     if (std::is_same<T, time_t>::value)
     {
-        // EEPROM.put(STORAGE_ADDRESS_HOUR_METER, data);
-
-        FILE *file = fopen("/littlefs/data.txt", "w");
+        File file = LittleFS.open(fullPath.c_str(), "w");
         if (file)
         {
             // Write the latest value in JSON format
-            fprintf(file, "%ld", data);
-            fclose(file);
+            file.printf("%ld", data);
+            file.close();
         }
         else
         {
-            Serial.println("Failed to open data.txt for writing");
+            Serial.printf("Failed to open %s for writing\n", path.c_str());
             return false;
         }
     }
