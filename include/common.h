@@ -8,6 +8,8 @@
 #define PIN_DIGITAL_IN_2 25
 #define PIN_DIGITAL_IN_3 26
 #define PIN_DIGITAL_IN_4 27
+#define PIN_TX_SERIAL2   17
+#define PIN_RX_SERIAL2   16
 
 // New Way
 struct GPSData_t {

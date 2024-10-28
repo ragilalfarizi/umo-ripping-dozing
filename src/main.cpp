@@ -37,7 +37,7 @@ TaskHandle_t rippingCounterHandler    = NULL;
 TaskHandle_t dozingCounterHandler     = NULL;
 
 /* GLOBAL VARIABLES */
-HardwareSerial modbus(1);
+HardwareSerial displayCom(2);
 DozerData_t data;
 DateTime now;
 // TODO: Declare Setting_t
@@ -75,9 +75,7 @@ void setup() {
   // TODO: Check alternator status
 
   /* DIGITAL INPUT FOR RIPPING AND DOZING INIT */
-  // TODO: set to input
   digitalInputInit();
-  // TODO: attach interrupt
 
   /* BLE INIT */
   // BLEDevice::init("OMU BLE BEACON");
@@ -108,7 +106,8 @@ void setup() {
   /* DISPLAY COM INIT */
   // TODO: ganti jadi display com
   Serial.println("[485] Inisialisasi RS485");
-  modbus.begin(9600, SERIAL_8N1, PIN_RX_RS485, PIN_TX_RS485);
+  // modbus.begin(9600, SERIAL_8N1, PIN_RX_RS485, PIN_TX_RS485);
+  displayCom.begin(9600, SERIAL_8N1, PIN_RX_SERIAL2, PIN_TX_SERIAL2);
 
   // xTaskCreatePinnedToCore(alternatorCounter, "Updating Alternator Hour
   // Meter", 2048, NULL, 3, &alternatorCounterHandler, 0);
@@ -116,10 +115,11 @@ void setup() {
                           NULL, 2, &rippingCounterHandler, 0);
   xTaskCreatePinnedToCore(dozingCounter, "Updating Dozing Hour Meter", 4096,
                           NULL, 2, &dozingCounterHandler, 0);
-  xTaskCreatePinnedToCore(getTimeAndDate, "get time and date", 2048, NULL, 1,
+  xTaskCreatePinnedToCore(getTimeAndDate, "get time and date", 2048, NULL, 0,
                           &getDateHandler, 0);
-  // xTaskCreatePinnedToCore(sendToDisplay, "send data to Display", 2048, NULL0,
-  // 3, &displayComHandler, 0); xTaskCreatePinnedToCore(sendBLEData, "Send BLE
+  xTaskCreatePinnedToCore(sendToDisplay, "send data to Display", 4096, NULL, 3,
+                          &displayComHandler, 1);
+  // xTaskCreatePinnedToCore(sendBLEData, "Send BLE
   // Data", 2048, NULL, 3, &sendBLEDataHandler, 0);
   // xTaskCreatePinnedToCore(retrieveGPSData, "get GPS Data", 2048, NULL, 4,
   // &retrieveGPSHandler, 1);
@@ -146,17 +146,22 @@ static void getTimeAndDate(void *pvParam) {
 }
 
 static void sendToDisplay(void *pvParam) {
-  // TODO:
-  // while(1)
-  //      printf with modbus
-  //      delay 1s
   while (1) {
-    // modbus.printf("%c,%f,%f,%.2f", data.gps.status, data.gps.latitude,
-    // data.gps.longitude, data.voltageSupply);
+    // Define character buffers for the hour meters
+    char rippingBuffer[20];
+    char dozingBuffer[20];
 
-    modbus.printf("DATA1,%s,%s,%s,%s,%s,%s,/r/n", data.rippingHourMeter,
-                  data.dozingHourMeter, data.ID, data.currentDate.c_str(),
+    // Convert time_t values to C-strings using snprintf
+    snprintf(rippingBuffer, sizeof(rippingBuffer), "%ld",
+             static_cast<long>(data.rippingHourMeter));
+    snprintf(dozingBuffer, sizeof(dozingBuffer), "%ld",
+             static_cast<long>(data.dozingHourMeter));
+
+    displayCom.printf("DATA1,%s,%s,%s,%s,%s,\r\n", rippingBuffer, dozingBuffer,
+                  data.ID.c_str(), data.currentDate.c_str(),
                   data.currentTime.c_str());
+
+    Serial.println("data is sent to the display");
 
     vTaskDelay(pdMS_TO_TICKS(1000));
   }
