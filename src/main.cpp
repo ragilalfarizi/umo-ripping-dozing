@@ -25,6 +25,7 @@ static void sendToDisplay(void *pvParam);
 static void alternatorCounter(void *pvParam);
 static void rippingCounter(void *pvParam);
 static void dozingCounter(void *pvParam);
+static void neutralMonitoring(void *pvParam);
 void IRAM_ATTR onDI3Change();
 void IRAM_ATTR onDI4Change();
 void IRAM_ATTR onDIChange();
@@ -36,11 +37,14 @@ TaskHandle_t displayComHandler        = NULL;
 TaskHandle_t alternatorCounterHandler = NULL;
 TaskHandle_t rippingCounterHandler    = NULL;
 TaskHandle_t dozingCounterHandler     = NULL;
+TaskHandle_t neutralMonitoringHandler = NULL;
 
 /* GLOBAL VARIABLES */
 HardwareSerial displayCom(2);
 DozerData_t data;
 DateTime now;
+MachineState machineState;
+AlternatorState alternatorState;
 // TODO: Declare Setting_t
 
 void setup() {
@@ -77,6 +81,9 @@ void setup() {
 
   /* DIGITAL INPUT FOR RIPPING AND DOZING INIT */
   digitalInputInit();
+
+  machineState    = MachineState::NEUTRAL;
+  alternatorState = AlternatorState::OFF;
 
   /* BLE INIT */
   // BLEDevice::init("OMU BLE BEACON");
@@ -120,6 +127,10 @@ void setup() {
                           &getDateHandler, 0);
   xTaskCreatePinnedToCore(sendToDisplay, "send data to Display", 4096, NULL, 3,
                           &displayComHandler, 1);
+  xTaskCreatePinnedToCore(alternatorCounter, "Alternator Monitor", 2048, NULL,
+                          2, &alternatorCounterHandler, 0);
+  xTaskCreatePinnedToCore(neutralMonitoring, "Neutral Monitor", 2048, NULL, 2,
+                          &neutralMonitoringHandler, 0);
   // xTaskCreatePinnedToCore(sendBLEData, "Send BLE
   // Data", 2048, NULL, 3, &sendBLEDataHandler, 0);
   // xTaskCreatePinnedToCore(retrieveGPSData, "get GPS Data", 2048, NULL, 4,
@@ -162,7 +173,7 @@ static void sendToDisplay(void *pvParam) {
                       data.ID.c_str(), data.currentDate.c_str(),
                       data.currentTime.c_str());
 
-    Serial.println("data is sent to the display");
+    Serial.println("[display] data is sent to the display");
 
     vTaskDelay(pdMS_TO_TICKS(1000));
   }
@@ -175,6 +186,29 @@ static void alternatorCounter(void *pvParam) {
   //          startCounting()
   //      else
   //          stopCouting()
+
+  while (1) {
+    data.alternatorValue = ain->readAnalogInput(AnalogPin::PIN_A0);
+    Serial.printf("[altnr] Nilai Tegangan Alternator : %.2f\n",
+                  data.alternatorValue);
+
+    if (data.alternatorValue > DEFAULT_ALTERNATOR_THRESHOLD) {
+      // switch state to active
+      alternatorState = AlternatorState::ON;
+      Serial.println("[System] Alternator berada pada kondisi ON");
+
+      // TODO: startCounting();
+
+    } else {
+      // switch state to off
+      alternatorState = AlternatorState::OFF;
+      Serial.println("[System] Alternator berada pada kondisi OFF");
+
+      // TODO: stopCounting();
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(1000));
+  }
 }
 
 static void rippingCounter(void *pvParam) {
@@ -260,25 +294,19 @@ static void dozingCounter(void *pvParam) {
   }
 }
 
-void IRAM_ATTR onDI3Change() {
-  BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+static void neutralMonitoring(void *pvParam) {
+  while (1) {
+    data.neutralStatus = digitalRead(PIN_DIGITAL_IN_2);
 
-  xTaskNotifyFromISR(rippingCounterHandler, 0, eNoAction,
-                     &xHigherPriorityTaskWoken);
+    if (data.neutralStatus == HIGH) {
+      machineState = MachineState::NEUTRAL;
+      Serial.println("[Neutral] Mesin berada pada keadaan Netral");
+    } else {
+      machineState = MachineState::ACTIVE;
+      Serial.println("[Neutral] Mesin berada pada keadaan Active");
+    }
 
-  if (xHigherPriorityTaskWoken == pdTRUE) {
-    portYIELD_FROM_ISR();
-  }
-}
-
-void IRAM_ATTR onDI4Change() {
-  BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-
-  xTaskNotifyFromISR(dozingCounterHandler, 0, eNoAction,
-                     &xHigherPriorityTaskWoken);
-
-  if (xHigherPriorityTaskWoken == pdTRUE) {
-    portYIELD_FROM_ISR();
+    vTaskDelay(pdMS_TO_TICKS(1000));
   }
 }
 
@@ -311,6 +339,7 @@ void IRAM_ATTR onDIChange() {
 void digitalInputInit() {
   pinMode(PIN_DIGITAL_IN_3, INPUT);
   pinMode(PIN_DIGITAL_IN_4, INPUT);
+  pinMode(PIN_DIGITAL_IN_2, INPUT);
 
   attachInterrupt(digitalPinToInterrupt(PIN_DIGITAL_IN_3), onDIChange, FALLING);
   attachInterrupt(digitalPinToInterrupt(PIN_DIGITAL_IN_4), onDIChange, FALLING);
