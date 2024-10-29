@@ -3,72 +3,66 @@
 #include <Arduino.h>
 #include <EEPROM.h>
 #include <LittleFS.h>
-#include "common.h"
 #include <rtc.h>
 
+#include "common.h"
+
 // WARN: DEPRECIATED
-#define STORAGE_ADDRESS_HOUR_METER 0 // Size of Hour Meter is 4 bytes
-#define STORAGE_ADDRESS_SETTINGS 4   // Size of Settings is 4 * 4 bytes
-#define FORMAT_LITTLEFS_IF_FAILED true
+#define STORAGE_ADDRESS_HOUR_METER 0  // Size of Hour Meter is 4 bytes
+#define STORAGE_ADDRESS_SETTINGS   4  // Size of Settings is 4 * 4 bytes
+#define FORMAT_LITTLEFS_IF_FAILED  true
 
-class HourMeter
-{
-public:
-    HourMeter(uint8_t format_on_fail = FORMAT_LITTLEFS_IF_FAILED);
-    ~HourMeter();
+class HourMeter {
+ public:
+  HourMeter(std::string fileName = "data.txt",
+            uint8_t formatOnFail = FORMAT_LITTLEFS_IF_FAILED);
 
-    int32_t getSavedHourMeter();
+  ~HourMeter();
 
-    template <typename T>
-    bool saveToStorage(const T &data);
+  int32_t getSavedHourMeter();
 
-    time_t loadHMFromStorage();
+  template <typename T>
+  bool saveToStorage(const T &data, std::string path);
 
-    Setting_t loadSettingFromStorage();
+  time_t loadHMFromStorage(std::string path = "data.txt");
 
-    void printStorage();
+  Setting_t loadSettingFromStorage();
 
-    DateTime convertHMToHourFormat(DateTime seconds);
+  void printStorage();
 
-    DateTime convertHMToMinuteFormat(DateTime seconds);
+  time_t convertHMToHourFormat(time_t seconds);
 
-    void resetHourMeter();
+  time_t convertHMToMinuteFormat(time_t seconds);
 
-private:
-    void checkAndCreateFiles();
+  void resetHourMeter();
+
+ private:
+  void checkAndCreateFiles(std::string fileName);
 };
 
 template <typename T>
-bool HourMeter::saveToStorage(const T &data)
-{
-    if (std::is_same<T, time_t>::value)
-    {
-        // EEPROM.put(STORAGE_ADDRESS_HOUR_METER, data);
+bool HourMeter::saveToStorage(const T &data, std::string path) {
+  std::string fullPath = "/" + path;
 
-        FILE *file = fopen("/littlefs/data.txt", "w");
-        if (file)
-        {
-            // Write the latest value in JSON format
-            fprintf(file, "%ld", data);
-            fclose(file);
-        }
-        else
-        {
-            Serial.println("Failed to open data.txt for writing");
-            return false;
-        }
+  if (std::is_same<T, time_t>::value) {
+    File file = LittleFS.open(fullPath.c_str(), "w");
+    if (file) {
+      // Write the latest value in JSON format
+      file.printf("%ld", data);
+      file.close();
+    } else {
+      Serial.printf("Failed to open %s for writing\n", path.c_str());
+      return false;
     }
+  }
 
-    else if (std::is_same<T, Setting_t>::value)
-    {
-        EEPROM.put(STORAGE_ADDRESS_SETTINGS, data);
-    }
-    else
-    {
-        return false;
-    }
+  else if (std::is_same<T, Setting_t>::value) {
+    EEPROM.put(STORAGE_ADDRESS_SETTINGS, data);
+  } else {
+    return false;
+  }
 
-    // EEPROM.commit();
+  // EEPROM.commit();
 
-    return true;
+  return true;
 }

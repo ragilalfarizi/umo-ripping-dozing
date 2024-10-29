@@ -12,11 +12,13 @@ public:
     RTC();
     ~RTC();
 
-    void printRTCData();
+    void printRTCData(DateTime& startTime);
+    std::string getCurrentTimeString(DateTime& time);
+    std::string getCurrentDateString(DateTime& time);
 
 private:
     // something
     // RTC_DS3231 _rtc;
-    DateTime startTime;
+    // DateTime startTime;
     char _daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
 };
