@@ -38,6 +38,11 @@ struct Setting_t {
   int32_t offsetThreshold;
 };
 
+enum class TruckState {
+  STANDBY,
+  OPERATIONAL,
+};
+
 // struct BeaconData_t {
 //     GPSData_t gps;
 //     float voltageSupply;

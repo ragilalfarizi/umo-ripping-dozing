@@ -27,6 +27,7 @@ static void rippingCounter(void *pvParam);
 static void dozingCounter(void *pvParam);
 void IRAM_ATTR onDI3Change();
 void IRAM_ATTR onDI4Change();
+void IRAM_ATTR onDIChange();
 static void digitalInputInit();
 
 /* FORWARD DECLARATION UNTUK HANDLER DAN SEMAPHORE RTOS */
@@ -158,8 +159,8 @@ static void sendToDisplay(void *pvParam) {
              static_cast<long>(data.dozingHourMeter));
 
     displayCom.printf("DATA1,%s,%s,%s,%s,%s,\r\n", rippingBuffer, dozingBuffer,
-                  data.ID.c_str(), data.currentDate.c_str(),
-                  data.currentTime.c_str());
+                      data.ID.c_str(), data.currentDate.c_str(),
+                      data.currentTime.c_str());
 
     Serial.println("data is sent to the display");
 
@@ -188,7 +189,8 @@ static void rippingCounter(void *pvParam) {
     Serial.printf("[HM] Ripping Counter start at %02d:%02d:%02d\n",
                   startTime.hour(), startTime.minute(), startTime.second());
 
-    while (digitalRead(PIN_DIGITAL_IN_3) == LOW) {
+    while (digitalRead(PIN_DIGITAL_IN_3) &&
+           digitalRead(PIN_DIGITAL_IN_4) == LOW) {
       pollingTime = rtc->now();
 
       // Kalkulasi selisih polling dan start time
@@ -280,14 +282,38 @@ void IRAM_ATTR onDI4Change() {
   }
 }
 
+void IRAM_ATTR onDIChange() {
+  BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
+  // Check the state of digital inputs
+  bool isDI3Active = (digitalRead(PIN_DIGITAL_IN_3) == LOW);  // Ripping trigger
+  bool isDI4Active = (digitalRead(PIN_DIGITAL_IN_4) == LOW);  // Dozing trigger
+
+  // if standby, return
+
+  // Check alternator voltage and machine status
+  // if (alternatorVoltage > 27.0 && machineStatus != MachineStatus::NEUTRAL) {
+  if (isDI3Active && isDI4Active) {
+    // Both DI3 and DI4 are active, start ripping task
+    xTaskNotifyFromISR(rippingCounterHandler, 0, eNoAction,
+                       &xHigherPriorityTaskWoken);
+  } else if (isDI4Active) {
+    // Only DI3 is active, start dozing task
+    xTaskNotifyFromISR(dozingCounterHandler, 0, eNoAction,
+                       &xHigherPriorityTaskWoken);
+  }
+
+  if (xHigherPriorityTaskWoken == pdTRUE) {
+    portYIELD_FROM_ISR();
+  }
+}
+
 void digitalInputInit() {
   pinMode(PIN_DIGITAL_IN_3, INPUT);
   pinMode(PIN_DIGITAL_IN_4, INPUT);
 
-  attachInterrupt(digitalPinToInterrupt(PIN_DIGITAL_IN_3), onDI3Change,
-                  FALLING);
-  attachInterrupt(digitalPinToInterrupt(PIN_DIGITAL_IN_4), onDI4Change,
-                  FALLING);
+  attachInterrupt(digitalPinToInterrupt(PIN_DIGITAL_IN_3), onDIChange, FALLING);
+  attachInterrupt(digitalPinToInterrupt(PIN_DIGITAL_IN_4), onDIChange, FALLING);
 }
 
 /*==========================================================================*/
