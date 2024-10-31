@@ -11,6 +11,8 @@
 #define PIN_TX_SERIAL2   17
 #define PIN_RX_SERIAL2   16
 
+#define DEFAULT_ALTERNATOR_THRESHOLD 2.00
+
 // New Way
 struct GPSData_t {
   double longitude;
@@ -19,7 +21,8 @@ struct GPSData_t {
 };
 
 struct DozerData_t {
-  uint8_t alternatorValue;
+  float alternatorValue;
+  bool neutralStatus;
   time_t alternatorHourMeter;
   bool rippingStatus;
   time_t rippingHourMeter;
@@ -36,6 +39,16 @@ struct Setting_t {
   int32_t voltageThreshold;
   int32_t codeUnit;
   int32_t offsetThreshold;
+};
+
+enum class MachineState {
+  NEUTRAL,
+  ACTIVE,
+};
+
+enum class AlternatorState {
+  ON,
+  OFF,
 };
 
 // struct BeaconData_t {
