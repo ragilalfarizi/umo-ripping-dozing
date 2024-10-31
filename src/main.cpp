@@ -22,20 +22,22 @@ HourMeter *dozing;
 /* FORWARD DECLARATION UNTUK FUNGSI-FUNGSI DI DEPAN*/
 static void getTimeAndDate(void *pvParam);
 static void sendToDisplay(void *pvParam);
-static void alternatorCounter(void *pvParam);
+static void alternatorMonitoring(void *pvParam);
 static void rippingCounter(void *pvParam);
 static void dozingCounter(void *pvParam);
 static void neutralMonitoring(void *pvParam);
+static void printDebug(void *pvParam);
 void IRAM_ATTR onDIChange();
 static void digitalInputInit();
 
 /* FORWARD DECLARATION UNTUK HANDLER DAN SEMAPHORE RTOS */
-TaskHandle_t getDateHandler           = NULL;
-TaskHandle_t displayComHandler        = NULL;
-TaskHandle_t alternatorCounterHandler = NULL;
-TaskHandle_t rippingCounterHandler    = NULL;
-TaskHandle_t dozingCounterHandler     = NULL;
-TaskHandle_t neutralMonitoringHandler = NULL;
+TaskHandle_t getDateHandler              = NULL;
+TaskHandle_t displayComHandler           = NULL;
+TaskHandle_t alternatorMonitoringHandler = NULL;
+TaskHandle_t rippingCounterHandler       = NULL;
+TaskHandle_t dozingCounterHandler        = NULL;
+TaskHandle_t neutralMonitoringHandler    = NULL;
+TaskHandle_t printDebugHandler           = NULL;
 
 /* GLOBAL VARIABLES */
 HardwareSerial displayCom(2);
@@ -115,8 +117,8 @@ void setup() {
   // modbus.begin(9600, SERIAL_8N1, PIN_RX_RS485, PIN_TX_RS485);
   displayCom.begin(9600, SERIAL_8N1, PIN_RX_SERIAL2, PIN_TX_SERIAL2);
 
-  // xTaskCreatePinnedToCore(alternatorCounter, "Updating Alternator Hour
-  // Meter", 2048, NULL, 3, &alternatorCounterHandler, 0);
+  // xTaskCreatePinnedToCore(alternatorMonitoring, "Updating Alternator Hour
+  // Meter", 2048, NULL, 3, &alternatorMonitoringHandler, 0);
   xTaskCreatePinnedToCore(rippingCounter, "Updating Ripping Hour Meter", 4096,
                           NULL, 2, &rippingCounterHandler, 0);
   xTaskCreatePinnedToCore(dozingCounter, "Updating Dozing Hour Meter", 4096,
@@ -125,10 +127,12 @@ void setup() {
                           &getDateHandler, 0);
   xTaskCreatePinnedToCore(sendToDisplay, "send data to Display", 4096, NULL, 3,
                           &displayComHandler, 1);
-  xTaskCreatePinnedToCore(alternatorCounter, "Alternator Monitor", 2048, NULL,
-                          2, &alternatorCounterHandler, 0);
+  xTaskCreatePinnedToCore(alternatorMonitoring, "Alternator Monitor", 2048,
+                          NULL, 2, &alternatorMonitoringHandler, 0);
   xTaskCreatePinnedToCore(neutralMonitoring, "Neutral Monitor", 2048, NULL, 2,
                           &neutralMonitoringHandler, 0);
+  xTaskCreatePinnedToCore(printDebug, "Print Debug", 2048, NULL, 3,
+                          &printDebugHandler, 0);
   // xTaskCreatePinnedToCore(sendBLEData, "Send BLE
   // Data", 2048, NULL, 3, &sendBLEDataHandler, 0);
   // xTaskCreatePinnedToCore(retrieveGPSData, "get GPS Data", 2048, NULL, 4,
@@ -177,168 +181,126 @@ static void sendToDisplay(void *pvParam) {
   }
 }
 
-static void alternatorCounter(void *pvParam) {
-  AlternatorState lastAlternatorState = alternatorState;
+static void alternatorMonitoring(void *pvParam) {
+  // AlternatorState lastAlternatorState = alternatorState;
 
   while (1) {
     data.alternatorValue = ain->readAnalogInput(AnalogPin::PIN_A0);
-    alternatorState      = (data.alternatorValue > DEFAULT_ALTERNATOR_THRESHOLD)
-                               ? AlternatorState::ON
-                               : AlternatorState::OFF;
 
-    // Only print when state changes
-    if (alternatorState != lastAlternatorState) {
-      Serial.printf("[System] Alternator berada pada kondisi %s. V=%.2f\n",
-                    alternatorState == AlternatorState::ON ? "ON" : "OFF",
-                    ain->readAnalogInput(AnalogPin::PIN_A0));
-      lastAlternatorState = alternatorState;  // Update last state
+    if (data.alternatorValue > DEFAULT_ALTERNATOR_THRESHOLD) {
+      alternatorState = AlternatorState::ON;
+    } else {
+      alternatorState = AlternatorState::OFF;
     }
+
     vTaskDelay(pdMS_TO_TICKS(1000));
   }
 }
 
 static void rippingCounter(void *pvParam) {
-  DateTime startTime, pollingTime;
-  time_t runHour = 0;
+  DateTime startTime, currentTime;
+  time_t runTimeAccrued = 0;
+  bool counting         = false;  // Tracks whether counting is active
 
   while (1) {
-    // Menunggu notifikasi dari interrupt digital input 3
-    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    // Poll the conditions
+    bool isAlternatorOn  = (alternatorState == AlternatorState::ON);
+    bool isMachineActive = (machineState == MachineState::ACTIVE);
+    bool isDI4Low        = (digitalRead(PIN_DIGITAL_IN_4) == LOW);
+    bool isDI3Low        = (digitalRead(PIN_DIGITAL_IN_3) == LOW);
 
-    if (!(alternatorState == AlternatorState::ON &&
-          machineState == MachineState::ACTIVE)) {
-      // alternator off atau neutral on
-      Serial.println(
-          "[system] alternator mati atau truk sedang berada pada posisi "
-          "neutral");
-
-      continue;
-    }
-
-    startTime = rtc->now();  // Ambil data waktu mulai
-    Serial.printf("[HM] Ripping Counter start at %02d:%02d:%02d\n",
-                  startTime.hour(), startTime.minute(), startTime.second());
-
-    while ((digitalRead(PIN_DIGITAL_IN_4) == LOW) &&
-           (digitalRead(PIN_DIGITAL_IN_3) == HIGH) &&
-           (alternatorState == AlternatorState::ON) &&
-           (machineState == MachineState::ACTIVE)) {
-      // check if suddenly the state of alternator and machine is ON
-      if (!(alternatorState == AlternatorState::ON &&
-            machineState == MachineState::ACTIVE)) {
-        Serial.println(
-            "[HM] Stopping dozingCounter: Alternator off or truck in "
-            "neutral");
-        break;
+    if (isAlternatorOn && isMachineActive && isDI4Low && isDI3Low) {
+      // All conditions are met; start or continue counting
+      if (!counting) {
+        startTime = rtc->now();
+        Serial.printf("[HM] Ripping Counter started at %02d:%02d:%02d\n",
+                      startTime.hour(), startTime.minute(), startTime.second());
+        counting = true;
       }
 
-      pollingTime = rtc->now();
+      currentTime    = rtc->now();
+      runTimeAccrued = static_cast<time_t>(currentTime.secondstime() -
+                                           startTime.secondstime());
+      data.rippingHourMeter += runTimeAccrued;
 
-      // Kalkulasi selisih polling dan start time
-      runHour = static_cast<time_t>(pollingTime.secondstime() -
-                                    startTime.secondstime());
+      Serial.printf("[HM] Total ripping time: %ld s\n", data.rippingHourMeter);
 
-      data.rippingHourMeter += runHour;
-      Serial.printf("[HM] The total ripping hour : %ld s\n",
-                    data.rippingHourMeter);
-
-      // Menyimpan ke Storage
+      // Save the ripping time to storage
       if (ripping->saveToStorage(data.rippingHourMeter, "ripping.txt")) {
-        Serial.println("[HM] total ripping hour is saved");
+        Serial.println("[HM] Ripping time saved to storage.");
       } else {
-        Serial.println("[HM] total ripping hour is failed to be saved");
+        Serial.println("[HM] Failed to save ripping time.");
       }
 
-      startTime = pollingTime;  // Update start time
-
-      vTaskDelay(pdMS_TO_TICKS(1000));
+      startTime = currentTime;  // Update start time for the next interval
+    } else if (counting) {
+      // One of the conditions is no longer met; stop counting
+      Serial.println("[HM] Ripping Counter stopped.");
+      counting = false;
     }
 
-    Serial.println("[HM] rippingCounter is stopped");
-
-    vTaskDelay(pdMS_TO_TICKS(1000));
+    vTaskDelay(pdMS_TO_TICKS(1000));  // Check conditions every second
   }
 }
 
 static void dozingCounter(void *pvParam) {
-  DateTime startTime, pollingTime;
-  time_t runHour = 0;
+  DateTime startTime, currentTime;
+  time_t runTimeAccrued = 0;
+  bool counting = false;  // Tracks whether counting is active
 
   while (1) {
-    // Menunggu notifikasi dari interrupt digital input 3
-    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    // Poll the conditions
+    bool isAlternatorOn  = (alternatorState == AlternatorState::ON);
+    bool isMachineActive = (machineState == MachineState::ACTIVE);
+    bool isDI4Low        = (digitalRead(PIN_DIGITAL_IN_4) == LOW);
+    bool isDI3High       = (digitalRead(PIN_DIGITAL_IN_3) == HIGH);
 
-    // cek alternator off atau neutral on
-    if (!(alternatorState == AlternatorState::ON &&
-          machineState == MachineState::ACTIVE)) {
-      Serial.println(
-          "[system] alternator mati atau truk sedang berada pada posisi "
-          "neutral");
-      vTaskDelay(pdMS_TO_TICKS(1000));
-
-      continue;
-    }
-
-    startTime = rtc->now();  // Ambil data waktu mulai
-    Serial.printf("[HM] Dozing Counter start at %02d:%02d:%02d\n",
-                  startTime.hour(), startTime.minute(), startTime.second());
-
-    while ((digitalRead(PIN_DIGITAL_IN_4) == LOW) &&
-           (digitalRead(PIN_DIGITAL_IN_3) == HIGH) &&
-           (alternatorState == AlternatorState::ON) &&
-           (machineState == MachineState::ACTIVE)) {
-      // check if suddenly the state of alternator and machine is ON
-      if (!(alternatorState == AlternatorState::ON &&
-            machineState == MachineState::ACTIVE)) {
-        Serial.println(
-            "[HM] Stopping dozingCounter: Alternator off or truck in "
-            "neutral");
-        break;
+    if (isAlternatorOn && isMachineActive && isDI4Low && isDI3High) {
+      // All conditions are met; start or continue counting
+      if (!counting) {
+        startTime = rtc->now();
+        Serial.printf("[HM] Dozing Counter started at %02d:%02d:%02d\n",
+                      startTime.hour(), startTime.minute(), startTime.second());
+        counting = true;
       }
 
-      pollingTime = rtc->now();
+      currentTime = rtc->now();
+      runTimeAccrued     = static_cast<time_t>(currentTime.secondstime() -
+                                        startTime.secondstime());
+      data.dozingHourMeter += runTimeAccrued;
 
-      // Kalkulasi selisih polling dan start time
-      runHour = static_cast<time_t>(pollingTime.secondstime() -
-                                    startTime.secondstime());
+      Serial.printf("[HM] Total dozing time: %ld s\n", data.dozingHourMeter);
 
-      data.dozingHourMeter += runHour;
-      Serial.printf("[HM] The total dozing hour : %ld s\n",
-                    data.dozingHourMeter);
-
-      // Menyimpan ke Storage
+      // Save the dozing time to storage
       if (ripping->saveToStorage(data.dozingHourMeter, "dozing.txt")) {
-        Serial.println("[HM] total dozing hour is saved");
+        Serial.println("[HM] Dozing time saved to storage.");
       } else {
-        Serial.println("[HM] total dozing hour is failed to be saved");
+        Serial.println("[HM] Failed to save dozing time.");
       }
 
-      startTime = pollingTime;  // Update start time
-
-      vTaskDelay(pdMS_TO_TICKS(1000));
+      startTime = currentTime;  // Update start time for the next interval
+    } else if (counting) {
+      // One of the conditions is no longer met; stop counting
+      Serial.println("[HM] Dozing Counter stopped.");
+      counting = false;
     }
 
-    Serial.println("[HM] dozingCounter is stopped");
-
-    vTaskDelay(pdMS_TO_TICKS(1000));
+    vTaskDelay(pdMS_TO_TICKS(1000));  // Check conditions every second
   }
 }
 
 static void neutralMonitoring(void *pvParam) {
-  MachineState lastMachineState = machineState;
+  // MachineState lastMachineState = machineState;
 
   while (1) {
-    data.neutralStatus = digitalRead(PIN_DIGITAL_IN_2);
-    machineState       = (data.neutralStatus == HIGH) ? MachineState::NEUTRAL
-                                                      : MachineState::ACTIVE;
+    // data.neutralStatus = digitalRead(PIN_DIGITAL_IN_2);
 
-    // Only print when state changes
-    if (machineState != lastMachineState) {
-      Serial.printf(
-          "[Neutral] Mesin berada pada keadaan %s\n",
-          machineState == MachineState::NEUTRAL ? "Netral" : "Active");
-      lastMachineState = machineState;  // Update last state
+    if (digitalRead(PIN_DIGITAL_IN_2) == LOW) {
+      machineState = MachineState::ACTIVE;
+    } else {
+      machineState = MachineState::NEUTRAL;
     }
+
     vTaskDelay(pdMS_TO_TICKS(1000));
   }
 }
@@ -373,12 +335,35 @@ void IRAM_ATTR onDIChange() {
 }
 
 void digitalInputInit() {
-  pinMode(PIN_DIGITAL_IN_3, INPUT);
-  pinMode(PIN_DIGITAL_IN_4, INPUT);
-  pinMode(PIN_DIGITAL_IN_2, INPUT);
+  pinMode(PIN_DIGITAL_IN_3, INPUT_PULLUP);
+  pinMode(PIN_DIGITAL_IN_4, INPUT_PULLUP);
+  pinMode(PIN_DIGITAL_IN_2, INPUT_PULLUP);
 
-  attachInterrupt(digitalPinToInterrupt(PIN_DIGITAL_IN_3), onDIChange, FALLING);
-  attachInterrupt(digitalPinToInterrupt(PIN_DIGITAL_IN_4), onDIChange, FALLING);
+  // attachInterrupt(digitalPinToInterrupt(PIN_DIGITAL_IN_3), onDIChange,
+  // FALLING); attachInterrupt(digitalPinToInterrupt(PIN_DIGITAL_IN_4),
+  // onDIChange, FALLING);
+}
+
+static void printDebug(void *pvParam) {
+  while (1) {
+    Serial.println("===================================================");
+    Serial.printf("ID\t\t\t: %s\n", data.ID.c_str());
+    Serial.printf("Alternator Status\t: %s\n",
+                  (alternatorState == AlternatorState::ON) ? "ON" : "OFF");
+    Serial.printf("Alternator\t\t: %.2f V\n", data.alternatorValue);
+    Serial.printf(
+        "Machine Status\t\t: %s\n",
+        (machineState == MachineState::ACTIVE) ? "ACTIVE" : "NEUTRAL");
+    // Serial.printf("Dozing Status\t\t: %ld s\n",
+    //               (data.dozingStatus) ? "LOW" : "HIGH");
+    Serial.printf("Dozing HM\t\t: %ld s\n", data.dozingHourMeter);
+    Serial.printf("Ripping HM\t\t: %ld s\n", data.rippingHourMeter);
+    // Serial.printf("Ripping Status\t\t: %ld s\n",
+    //               (data.rippingStatus) ? "LOW" : "HIGH");
+    Serial.println("===================================================");
+
+    vTaskDelay(pdMS_TO_TICKS(1000));
+  }
 }
 
 /*==========================================================================*/
