@@ -26,8 +26,6 @@ static void alternatorCounter(void *pvParam);
 static void rippingCounter(void *pvParam);
 static void dozingCounter(void *pvParam);
 static void neutralMonitoring(void *pvParam);
-void IRAM_ATTR onDI3Change();
-void IRAM_ATTR onDI4Change();
 void IRAM_ATTR onDIChange();
 static void digitalInputInit();
 
@@ -76,7 +74,7 @@ void setup() {
   Serial.println("[AIN] Inisialisasi Analog Input");
   ain                      = new AnalogInput();
   data.alternatorHourMeter = ain->readAnalogInput(
-      AnalogPin::PIN_A3);  // untuk membaca di pin_a3 (PIN 4 pada silkscreen)
+      AnalogPin::PIN_A0);  // untuk membaca di pin_a3 (PIN 4 pada silkscreen)
   // TODO: Check alternator status
 
   /* DIGITAL INPUT FOR RIPPING AND DOZING INIT */
@@ -173,40 +171,28 @@ static void sendToDisplay(void *pvParam) {
                       data.ID.c_str(), data.currentDate.c_str(),
                       data.currentTime.c_str());
 
-    Serial.println("[display] data is sent to the display");
+    // Serial.println("[display] data is sent to the display");
 
     vTaskDelay(pdMS_TO_TICKS(1000));
   }
 }
 
 static void alternatorCounter(void *pvParam) {
-  // TODO:
-  // while(1)
-  //      if(alternatorValue > Threshold)
-  //          startCounting()
-  //      else
-  //          stopCouting()
+  AlternatorState lastAlternatorState = alternatorState;
 
   while (1) {
     data.alternatorValue = ain->readAnalogInput(AnalogPin::PIN_A0);
-    Serial.printf("[altnr] Nilai Tegangan Alternator : %.2f\n",
-                  data.alternatorValue);
+    alternatorState      = (data.alternatorValue > DEFAULT_ALTERNATOR_THRESHOLD)
+                               ? AlternatorState::ON
+                               : AlternatorState::OFF;
 
-    if (data.alternatorValue > DEFAULT_ALTERNATOR_THRESHOLD) {
-      // switch state to active
-      alternatorState = AlternatorState::ON;
-      Serial.println("[System] Alternator berada pada kondisi ON");
-
-      // TODO: startCounting();
-
-    } else {
-      // switch state to off
-      alternatorState = AlternatorState::OFF;
-      Serial.println("[System] Alternator berada pada kondisi OFF");
-
-      // TODO: stopCounting();
+    // Only print when state changes
+    if (alternatorState != lastAlternatorState) {
+      Serial.printf("[System] Alternator berada pada kondisi %s. V=%.2f\n",
+                    alternatorState == AlternatorState::ON ? "ON" : "OFF",
+                    ain->readAnalogInput(AnalogPin::PIN_A0));
+      lastAlternatorState = alternatorState;  // Update last state
     }
-
     vTaskDelay(pdMS_TO_TICKS(1000));
   }
 }
@@ -219,12 +205,33 @@ static void rippingCounter(void *pvParam) {
     // Menunggu notifikasi dari interrupt digital input 3
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
+    if (!(alternatorState == AlternatorState::ON &&
+          machineState == MachineState::ACTIVE)) {
+      // alternator off atau neutral on
+      Serial.println(
+          "[system] alternator mati atau truk sedang berada pada posisi "
+          "neutral");
+
+      continue;
+    }
+
     startTime = rtc->now();  // Ambil data waktu mulai
     Serial.printf("[HM] Ripping Counter start at %02d:%02d:%02d\n",
                   startTime.hour(), startTime.minute(), startTime.second());
 
-    while (digitalRead(PIN_DIGITAL_IN_3) &&
-           digitalRead(PIN_DIGITAL_IN_4) == LOW) {
+    while ((digitalRead(PIN_DIGITAL_IN_4) == LOW) &&
+           (digitalRead(PIN_DIGITAL_IN_3) == HIGH) &&
+           (alternatorState == AlternatorState::ON) &&
+           (machineState == MachineState::ACTIVE)) {
+      // check if suddenly the state of alternator and machine is ON
+      if (!(alternatorState == AlternatorState::ON &&
+            machineState == MachineState::ACTIVE)) {
+        Serial.println(
+            "[HM] Stopping dozingCounter: Alternator off or truck in "
+            "neutral");
+        break;
+      }
+
       pollingTime = rtc->now();
 
       // Kalkulasi selisih polling dan start time
@@ -261,11 +268,34 @@ static void dozingCounter(void *pvParam) {
     // Menunggu notifikasi dari interrupt digital input 3
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
+    // cek alternator off atau neutral on
+    if (!(alternatorState == AlternatorState::ON &&
+          machineState == MachineState::ACTIVE)) {
+      Serial.println(
+          "[system] alternator mati atau truk sedang berada pada posisi "
+          "neutral");
+      vTaskDelay(pdMS_TO_TICKS(1000));
+
+      continue;
+    }
+
     startTime = rtc->now();  // Ambil data waktu mulai
     Serial.printf("[HM] Dozing Counter start at %02d:%02d:%02d\n",
                   startTime.hour(), startTime.minute(), startTime.second());
 
-    while (digitalRead(PIN_DIGITAL_IN_4) == LOW) {
+    while ((digitalRead(PIN_DIGITAL_IN_4) == LOW) &&
+           (digitalRead(PIN_DIGITAL_IN_3) == HIGH) &&
+           (alternatorState == AlternatorState::ON) &&
+           (machineState == MachineState::ACTIVE)) {
+      // check if suddenly the state of alternator and machine is ON
+      if (!(alternatorState == AlternatorState::ON &&
+            machineState == MachineState::ACTIVE)) {
+        Serial.println(
+            "[HM] Stopping dozingCounter: Alternator off or truck in "
+            "neutral");
+        break;
+      }
+
       pollingTime = rtc->now();
 
       // Kalkulasi selisih polling dan start time
@@ -295,17 +325,20 @@ static void dozingCounter(void *pvParam) {
 }
 
 static void neutralMonitoring(void *pvParam) {
+  MachineState lastMachineState = machineState;
+
   while (1) {
     data.neutralStatus = digitalRead(PIN_DIGITAL_IN_2);
+    machineState       = (data.neutralStatus == HIGH) ? MachineState::NEUTRAL
+                                                      : MachineState::ACTIVE;
 
-    if (data.neutralStatus == HIGH) {
-      machineState = MachineState::NEUTRAL;
-      Serial.println("[Neutral] Mesin berada pada keadaan Netral");
-    } else {
-      machineState = MachineState::ACTIVE;
-      Serial.println("[Neutral] Mesin berada pada keadaan Active");
+    // Only print when state changes
+    if (machineState != lastMachineState) {
+      Serial.printf(
+          "[Neutral] Mesin berada pada keadaan %s\n",
+          machineState == MachineState::NEUTRAL ? "Netral" : "Active");
+      lastMachineState = machineState;  // Update last state
     }
-
     vTaskDelay(pdMS_TO_TICKS(1000));
   }
 }
@@ -320,12 +353,15 @@ void IRAM_ATTR onDIChange() {
   // if standby, return
 
   // Check alternator voltage and machine status
-  // if (alternatorVoltage > 27.0 && machineStatus != MachineStatus::NEUTRAL) {
+  // if (alternatorVoltage > 27.0 && machineStatus != MachineStatus::NEUTRAL)
+  // {
   if (isDI3Active && isDI4Active) {
     // Both DI3 and DI4 are active, start ripping task
+    // Serial.println("di3 di4 active");
     xTaskNotifyFromISR(rippingCounterHandler, 0, eNoAction,
                        &xHigherPriorityTaskWoken);
   } else if (isDI4Active) {
+    // Serial.println("di4 active");
     // Only DI3 is active, start dozing task
     xTaskNotifyFromISR(dozingCounterHandler, 0, eNoAction,
                        &xHigherPriorityTaskWoken);
