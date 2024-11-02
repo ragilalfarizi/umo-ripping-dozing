@@ -1,261 +1,314 @@
-#include "analog_input.h"
-#include "rtc.h"
 #include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
 #include <freertos/semphr.h>
-#include "NimBLEDevice.h"
-#include "NimBLEBeacon.h"
+#include <freertos/task.h>
+
 #include "NimBLEAdvertising.h"
+#include "NimBLEBeacon.h"
+#include "NimBLEDevice.h"
 #include "NimBLEEddystoneURL.h"
+#include "analog_input.h"
 #include "common.h"
 #include "gps.h"
 #include "hour_meter_manager.h"
+#include "rtc.h"
 
 /* DEKLARASI OBJEK YANG DIGUNAKAN TERSIMPAN DI HEAP */
 RTC *rtc;
 AnalogInput *ain;
-GPS *gps;
-HourMeter *hm;
+HourMeter *alternator;
+HourMeter *ripping;
+HourMeter *dozing;
 
 /* FORWARD DECLARATION UNTUK FUNGSI-FUNGSI DI DEPAN*/
-static void RTCDemo(void *pvParam);
-static void dataAcquisition(void *pvParam);
-static void sendBLEData(void *pvParam);
-static void retrieveGPSData(void *pvParam);
-static void sendToRS485(void *pvParam);
-static void countingHourMeter(void *pvParam);
-static void serialConfig(void *pvParam);
-static void setCustomBeacon();
+static void getTimeAndDate(void *pvParam);
+static void sendToDisplay(void *pvParam);
+static void alternatorMonitoring(void *pvParam);
+static void rippingCounter(void *pvParam);
+static void dozingCounter(void *pvParam);
+static void neutralMonitoring(void *pvParam);
+static void printDebug(void *pvParam);
+static void digitalInputInit();
 
 /* FORWARD DECLARATION UNTUK HANDLER DAN SEMAPHORE RTOS */
-// TaskHandle_t RTCDemoHandler = NULL;
-TaskHandle_t dataAcquisitionHandler = NULL;
-TaskHandle_t sendBLEDataHandler = NULL;
-TaskHandle_t retrieveGPSHandler = NULL;
-TaskHandle_t sendToRS485Handler = NULL;
-TaskHandle_t countingHMHandler = NULL;
-SemaphoreHandle_t xSemaphore = NULL;
+TaskHandle_t getDateHandler              = NULL;
+TaskHandle_t displayComHandler           = NULL;
+TaskHandle_t alternatorMonitoringHandler = NULL;
+TaskHandle_t rippingCounterHandler       = NULL;
+TaskHandle_t dozingCounterHandler        = NULL;
+TaskHandle_t neutralMonitoringHandler    = NULL;
+TaskHandle_t printDebugHandler           = NULL;
 
 /* GLOBAL VARIABLES */
-BLEAdvertising *pAdvertising;
-BeaconData_t data;
-HardwareSerial modbus(1);
-time_t currentHourMeter;
+HardwareSerial displayCom(2);
+DozerData_t data;
+DateTime now;
+MachineState machineState;
+AlternatorState alternatorState;
 // TODO: Declare Setting_t
 
-void setup()
-{
-    /* SERIAL INIT */
-    Serial.begin(9600);
-    Serial.println("[Serial] Mesin dinyalakan");
+void setup() {
+  /* SERIAL INIT */
+  Serial.begin(9600);
+  Serial.println("[Serial] Mesin dinyalakan");
 
-    /* RTC INIT */
-    Serial.println("[RTC] Inisialisasi RTC");
-    rtc = new RTC();
-    if (rtc == nullptr)
-    {
-        Serial.println("[ERROR] Failed to allocate memory for RTC object, retrying in 5 seconds...");
-        vTaskDelay(pdMS_TO_TICKS(5000)); // Wait for 5 seconds before retrying
+  /* RTC INIT */
+  Serial.println("[RTC] Inisialisasi RTC");
+  rtc = new RTC();
+  if (rtc == nullptr) {
+    Serial.println(
+        "[ERROR] Failed to allocate memory for RTC object, retrying in 5 "
+        "seconds...");
+    vTaskDelay(pdMS_TO_TICKS(5000));  // Wait for 5 seconds before retrying
+  }
+
+  if (rtc->lostPower()) {
+    Serial.println("RTC lost power, let's set the time!");
+    // When time needs to be set on a new device, or after a power loss, the
+    // following line sets the RTC to the date & time this sketch was compiled
+    rtc->adjust(DateTime(F(__DATE__), F(__TIME__)));
+    // This line sets the RTC with an explicit date & time, for example to set
+    // January 21, 2014 at 3am you would call:
+    // rtc.adjust(DateTime(2014, 1, 21, 3, 0, 0));
+  }
+
+  /* ANALOG INPUT FOR ALTERNATOR INIT */
+  Serial.println("[AIN] Inisialisasi Analog Input");
+  ain                      = new AnalogInput();
+  data.alternatorHourMeter = ain->readAnalogInput(
+      AnalogPin::PIN_A0);  // To read from A0 (PIN 1 on the silkscreen)
+
+  /* DIGITAL INPUT FOR RIPPING AND DOZING INIT */
+  digitalInputInit();
+
+  machineState    = MachineState::NEUTRAL;
+  alternatorState = AlternatorState::OFF;
+
+  /* HOUR METER INIT */
+  alternator               = new HourMeter("alternator.txt");
+  data.alternatorHourMeter = alternator->loadHMFromStorage("alternator.txt");
+  Serial.printf("[HM] Hour Meter ALTERNATOR yang tersimpan adalah %ld\n",
+                data.alternatorHourMeter);
+
+  ripping               = new HourMeter("ripping.txt");
+  data.rippingHourMeter = ripping->loadHMFromStorage("ripping.txt");
+  Serial.printf("[HM] Hour Meter RIPPING yang tersimpan adalah %ld\n",
+                data.rippingHourMeter);
+
+  dozing               = new HourMeter("dozing.txt");
+  data.dozingHourMeter = dozing->loadHMFromStorage("dozing.txt");
+  Serial.printf("[HM] Hour Meter DOZING yang tersimpan adalah %ld\n",
+                data.dozingHourMeter);
+
+  // LOAD DEVICE ID
+  // The ID IS HARD-CODED FOR A WHILE
+  data.ID = "CD001";
+
+  /* DISPLAY COM INIT */
+  // TODO: ganti jadi display com
+  Serial.println("[485] Inisialisasi RS485");
+  displayCom.begin(9600, SERIAL_8N1, PIN_RX_SERIAL2, PIN_TX_SERIAL2);
+
+  xTaskCreatePinnedToCore(rippingCounter, "Updating Ripping Hour Meter", 4096,
+                          NULL, 2, &rippingCounterHandler, 0);
+  xTaskCreatePinnedToCore(dozingCounter, "Updating Dozing Hour Meter", 4096,
+                          NULL, 2, &dozingCounterHandler, 0);
+  xTaskCreatePinnedToCore(getTimeAndDate, "get time and date", 2048, NULL, 0,
+                          &getDateHandler, 0);
+  xTaskCreatePinnedToCore(sendToDisplay, "send data to Display", 4096, NULL, 3,
+                          &displayComHandler, 1);
+  xTaskCreatePinnedToCore(alternatorMonitoring, "Alternator Monitor", 2048,
+                          NULL, 2, &alternatorMonitoringHandler, 0);
+  xTaskCreatePinnedToCore(neutralMonitoring, "Neutral Monitor", 2048, NULL, 2,
+                          &neutralMonitoringHandler, 0);
+  xTaskCreatePinnedToCore(printDebug, "Print Debug", 2048, NULL, 3,
+                          &printDebugHandler, 0);
+}
+
+void loop() {}
+
+static void getTimeAndDate(void *pvParam) {
+  DateTime date;
+
+  while (1) {
+    date = rtc->now();
+
+    data.currentTime = rtc->getCurrentTimeString(date);
+    data.currentDate = rtc->getCurrentDateString(date);
+
+    // sprintf(data.currentTime, )
+
+    Serial.printf("[TIME] Date : %s\n", data.currentDate.c_str());
+    Serial.printf("[TIME] Time : %s\n", data.currentTime.c_str());
+
+    vTaskDelay(pdMS_TO_TICKS(60 * 1000));  // delay for one minute
+  }
+}
+
+static void sendToDisplay(void *pvParam) {
+  while (1) {
+    // Define character buffers for the hour meters
+    char rippingBuffer[20];
+    char dozingBuffer[20];
+
+    // Convert time_t values to C-strings using snprintf
+    snprintf(rippingBuffer, sizeof(rippingBuffer), "%.4f",
+             (data.rippingHourMeter / 3600.0));
+    snprintf(dozingBuffer, sizeof(dozingBuffer), "%.4f",
+             (data.dozingHourMeter / 3600.0));
+
+    displayCom.printf("DATA1,%s,%s,%s,%s,%s,\r\n", rippingBuffer, dozingBuffer,
+                      data.ID.c_str(), data.currentDate.c_str(),
+                      data.currentTime.c_str());
+
+    vTaskDelay(pdMS_TO_TICKS(1000));
+  }
+}
+
+static void alternatorMonitoring(void *pvParam) {
+  while (1) {
+    data.alternatorValue = ain->readAnalogInput(AnalogPin::PIN_A0);
+
+    if (data.alternatorValue > DEFAULT_ALTERNATOR_THRESHOLD) {
+      alternatorState = AlternatorState::ON;
+    } else {
+      alternatorState = AlternatorState::OFF;
     }
 
-    /* ANALOG INPUT INIT */
-    Serial.println("[AIN] Inisialisasi Analog Input");
-    ain = new AnalogInput();
-    data.voltageSupply = ain->readAnalogInput(AnalogPin::PIN_A0); // untuk membaca di pin_a0 (PIN 1 pada silkscreen)
-
-    /* GPS INIT */
-    Serial.println("[GPS] Inisialisasi GPS");
-    gps = new GPS();
-    data.gps.latitude = 0;
-    data.gps.longitude = 0;
-    data.gps.status = 'A';
-
-    /* RS485 INIT */
-    Serial.println("[485] Inisialisasi RS485");
-    modbus.begin(9600, SERIAL_8N1, PIN_RX_RS485, PIN_TX_RS485);
-
-    xSemaphore = xSemaphoreCreateBinary();
-    xSemaphoreGive(xSemaphore);
-
-    /* BLE INIT */
-    BLEDevice::init("OMU BLE BEACON");
-    BLEDevice::setPower(ESP_PWR_LVL_N12);
-    pAdvertising = BLEDevice::getAdvertising();
-
-    /* HOUR METER INIT */
-    hm = new HourMeter(currentHourMeter);
-    currentHourMeter = hm->loadHMFromStorage();
-    Serial.printf("[HM] Hour Meter yang tersimpan adalah %ld\n", currentHourMeter);
-    // TODO: Print juga hour meter dalam jam
-
-    // xTaskCreatePinnedToCore(RTCDemo, "RTC Demo", 2048, NULL, 3, &RTCDemoHandler, 1); // TODO: Depreciating
-    xTaskCreatePinnedToCore(dataAcquisition, "Data Acquisition", 4096, NULL, 3, &dataAcquisitionHandler, 1);
-    xTaskCreatePinnedToCore(sendBLEData, "Send BLE Data", 2048, NULL, 3, &sendBLEDataHandler, 0);
-    xTaskCreatePinnedToCore(retrieveGPSData, "get GPS Data", 2048, NULL, 4, &retrieveGPSHandler, 1);
-    xTaskCreatePinnedToCore(sendToRS485, "send data to RS485", 2048, NULL, 3, &sendToRS485Handler, 0);
-    xTaskCreatePinnedToCore(countingHourMeter, "Updating Hour Meter", 8192, NULL, 3, &countingHMHandler, 0);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+  }
 }
 
-void loop()
-{
-}
+static void rippingCounter(void *pvParam) {
+  DateTime startTime, currentTime;
+  time_t runTimeAccrued = 0;
+  bool counting         = false;  // Tracks whether counting is active
 
-static void RTCDemo(void *pvParam)
-{
-    while (1)
-    {
-        if (xSemaphoreTake(xSemaphore, portMAX_DELAY))
-        {
-            Serial.println();
-            Serial.printf("============================================\n");
-            rtc->printRTCData();
-            Serial.printf("============================================\n");
+  while (1) {
+    // Poll the conditions
+    bool isAlternatorOn  = (alternatorState == AlternatorState::ON);
+    bool isMachineActive = (machineState == MachineState::ACTIVE);
+    bool isDI4Low        = (digitalRead(PIN_DIGITAL_IN_4) == LOW);
+    bool isDI3Low        = (digitalRead(PIN_DIGITAL_IN_3) == LOW);
 
-            xSemaphoreGive(xSemaphore);
-            vTaskDelay(pdMS_TO_TICKS(100));
-        }
+    if (isAlternatorOn && isMachineActive && isDI4Low && isDI3Low) {
+      // All conditions are met; start or continue counting
+      if (!counting) {
+        startTime = rtc->now();
+        Serial.printf("[HM] Ripping Counter started at %02d:%02d:%02d\n",
+                      startTime.hour(), startTime.minute(), startTime.second());
+        counting = true;
+      }
+
+      currentTime    = rtc->now();
+      runTimeAccrued = static_cast<time_t>(currentTime.secondstime() -
+                                           startTime.secondstime());
+      data.rippingHourMeter += runTimeAccrued;
+
+      Serial.printf("[HM] Total ripping time: %ld s\n", data.rippingHourMeter);
+
+      // Save the ripping time to storage
+      if (ripping->saveToStorage(data.rippingHourMeter, "ripping.txt")) {
+        Serial.println("[HM] Ripping time saved to storage.");
+      } else {
+        Serial.println("[HM] Failed to save ripping time.");
+      }
+
+      startTime = currentTime;  // Update start time for the next interval
+    } else if (counting) {
+      // One of the conditions is no longer met; stop counting
+      Serial.println("[HM] Ripping Counter stopped.");
+      counting = false;
     }
+
+    vTaskDelay(pdMS_TO_TICKS(1000));  // Check conditions every second
+  }
 }
 
-static void dataAcquisition(void *pvParam)
-{
-    while (1)
-    {
-        if (xSemaphoreTake(xSemaphore, portMAX_DELAY))
-        {
-            data.gps.latitude = gps->getlatitude();
-            data.gps.longitude = gps->getLongitude();
-            data.voltageSupply = ain->readAnalogInput(AnalogPin::PIN_A0);
+static void dozingCounter(void *pvParam) {
+  DateTime startTime, currentTime;
+  time_t runTimeAccrued = 0;
+  bool counting = false;  // Tracks whether counting is active
 
-            Serial.printf("============================================\n");
-            Serial.printf("GPS STATUS\t\t= %c\n", data.gps.status);
-            Serial.printf("GPS LATITUDE\t\t= %f\n", data.gps.latitude);
-            Serial.printf("GPS LONGITUDE\t\t= %f\n", data.gps.longitude);
-            Serial.printf("Analog Input\t\t= %.2f\n", data.voltageSupply);
-            Serial.printf("============================================\n");
+  while (1) {
+    // Poll the conditions
+    bool isAlternatorOn  = (alternatorState == AlternatorState::ON);
+    bool isMachineActive = (machineState == MachineState::ACTIVE);
+    bool isDI4Low        = (digitalRead(PIN_DIGITAL_IN_4) == LOW);
+    bool isDI3High       = (digitalRead(PIN_DIGITAL_IN_3) == HIGH);
 
-            xSemaphoreGive(xSemaphore);
-            vTaskDelay(pdMS_TO_TICKS(1000));
-        }
+    if (isAlternatorOn && isMachineActive && isDI4Low && isDI3High) {
+      // All conditions are met; start or continue counting
+      if (!counting) {
+        startTime = rtc->now();
+        Serial.printf("[HM] Dozing Counter started at %02d:%02d:%02d\n",
+                      startTime.hour(), startTime.minute(), startTime.second());
+        counting = true;
+      }
+
+      currentTime = rtc->now();
+      runTimeAccrued     = static_cast<time_t>(currentTime.secondstime() -
+                                        startTime.secondstime());
+      data.dozingHourMeter += runTimeAccrued;
+
+      Serial.printf("[HM] Total dozing time: %ld s\n", data.dozingHourMeter);
+
+      // Save the dozing time to storage
+      if (ripping->saveToStorage(data.dozingHourMeter, "dozing.txt")) {
+        Serial.println("[HM] Dozing time saved to storage.");
+      } else {
+        Serial.println("[HM] Failed to save dozing time.");
+      }
+
+      startTime = currentTime;  // Update start time for the next interval
+    } else if (counting) {
+      // One of the conditions is no longer met; stop counting
+      Serial.println("[HM] Dozing Counter stopped.");
+      counting = false;
     }
+
+    vTaskDelay(pdMS_TO_TICKS(1000));  // Check conditions every second
+  }
 }
 
-static void setCustomBeacon()
-{
-    // atur data advertising
-    BLEAdvertisementData oAdvertisementData = BLEAdvertisementData();
-    BLEAdvertisementData oScanResponseData = BLEAdvertisementData();
-
-    const uint16_t beaconUUID = 0xFEAA;
-    oScanResponseData.setFlags(0x06); // GENERAL_DISC_MODE 0x02 | BR_EDR_NOT_SUPPORTED 0x04
-    oScanResponseData.setCompleteServices(BLEUUID(beaconUUID));
-
-    // uint16_t voltage = random(2800, 3700); // dalam millivolts
-    // analogInputVal = ain->readAnalogInput(AnalogPin::PIN_A1);
-    // float current = 1.5;             // dalam ampere
-    // uint32_t timestamp = 1678801234; // contoh Unix TimeStamp
-
-    // Convert current to a 16-bit fixed-point format (e.g., 1.5 A -> 384 in 8.8 format)
-    // Konversi arus ke format (contoh: 1.5 A -> 384 di format 8.8)
-    // int16_t currentFixedPoint = (int16_t)(current * 256);
-    // int16_t analogInputFixedPoint = (int16_t)(analogInputVal * 256);
-
-    /* PROCESSING DATA SEBELUM DIKIRIM MELALUI BLE */
-    char beacon_data[15];
-    uint16_t volt = data.voltageSupply * 1000; // 3300mV = 3.3V
-    int32_t latitudeFixedPoint = (int32_t)(data.gps.latitude * 256);
-    int32_t longitudeFixedPoint = (int32_t)(data.gps.longitude * 256);
-
-    beacon_data[0] = 0x01; // Eddystone Frame Type (Unencrypted Eddystone-TLM)
-    beacon_data[1] = 0x00; // TLM version
-    beacon_data[2] = 0x01;
-    beacon_data[3] = (volt >> 8);                                // Battery voltage, 1 mV/bit i.e. 0xCE4 = 3300mV = 3.3V
-    beacon_data[4] = (volt & 0xFF);                              //
-    beacon_data[5] = 0;                                          // Eddystone Frame Type (Unencrypted Eddystone-TLM)
-    beacon_data[6] = data.gps.status;                            //
-    beacon_data[7] = ((longitudeFixedPoint & 0xFF000000) >> 24); //
-    beacon_data[8] = ((longitudeFixedPoint & 0xFF0000) >> 16);   //
-    beacon_data[9] = ((longitudeFixedPoint & 0xFF00) >> 8);      //
-    beacon_data[10] = (longitudeFixedPoint & 0xFF);              //
-    beacon_data[11] = ((latitudeFixedPoint & 0xFF000000) >> 24); //
-    beacon_data[12] = ((latitudeFixedPoint & 0xFF0000) >> 16);   //
-    beacon_data[13] = ((latitudeFixedPoint & 0xFF00) >> 8);      //
-    beacon_data[14] = (latitudeFixedPoint & 0xFF);               //
-    // beacon_data[15] = (((lastTenth / 10) & 0xFF000000) >> 24);    //
-    // beacon_data[16] = (((lastTenth / 10) & 0xFF0000) >> 16);      //
-    // beacon_data[17] = (((lastTenth / 10) & 0xFF00) >> 8);         //
-    // beacon_data[18] = ((lastTenth / 10) & 0xFF);                  //
-
-    oScanResponseData.setServiceData(BLEUUID(beaconUUID), std::string(beacon_data, sizeof(beacon_data)));
-    oAdvertisementData.setName("OMU Demo Data");
-    pAdvertising->setAdvertisementData(oAdvertisementData);
-    pAdvertising->setScanResponseData(oScanResponseData);
-}
-
-static void sendBLEData(void *pvParam)
-{
-
-    while (1)
-    {
-        setCustomBeacon();
-        pAdvertising->start();
-        Serial.println("[BLE] Advertising...");
-        vTaskDelay(pdMS_TO_TICKS(1000));
+static void neutralMonitoring(void *pvParam) {
+  while (1) {
+    if (digitalRead(PIN_DIGITAL_IN_2) == LOW) {
+      machineState = MachineState::ACTIVE;
+    } else {
+      machineState = MachineState::NEUTRAL;
     }
+
+    vTaskDelay(pdMS_TO_TICKS(1000));
+  }
 }
 
-/**
- * WARNING: Haven't fully tested. It should be working.
- *          But when I tested it, it took too long to retreive
- *          GPS Data.
- * */
-static void retrieveGPSData(void *pvParam)
-{
-    bool isValid = false;
-
-    while (1) // void loop
-    {
-        Serial.println("[GPS] encoding...");
-
-        while (Serial.available() > 0)
-        {
-            char gpsChar = Serial.read();
-            gps->encode(gpsChar);
-        }
-
-        isValid = gps->getValidation();
-
-        if ((gps->getCharProcessed()) < 10)
-        {
-            Serial.println("[GPS] GPS module not sending data, check wiring or module power");
-        }
-        else
-        {
-            if (isValid)
-            {
-                Serial.printf("[GPS] Latitude : %f", data.gps.longitude);
-                Serial.printf("[GPS] Longitude : %f", data.gps.longitude);
-            }
-            else
-            {
-                Serial.println("[GPS] GPS is searching for a signal...");
-            }
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(2000));
-    }
+void digitalInputInit() {
+  pinMode(PIN_DIGITAL_IN_3, INPUT_PULLUP);
+  pinMode(PIN_DIGITAL_IN_4, INPUT_PULLUP);
+  pinMode(PIN_DIGITAL_IN_2, INPUT_PULLUP);
 }
 
-static void sendToRS485(void *pvParam)
-{
+static void printDebug(void *pvParam) {
+  while (1) {
+    Serial.println("===================================================");
+    Serial.printf("ID\t\t\t: %s\n", data.ID.c_str());
+    Serial.printf("Alternator Status\t: %s\n",
+                  (alternatorState == AlternatorState::ON) ? "ON" : "OFF");
+    Serial.printf("Alternator\t\t: %.2f V\n", data.alternatorValue);
+    Serial.printf(
+        "Machine Status\t\t: %s\n",
+        (machineState == MachineState::ACTIVE) ? "ACTIVE" : "NEUTRAL");
+    Serial.printf("Dozing HM\t\t: %ld s\n", data.dozingHourMeter);
+    Serial.printf("Ripping HM\t\t: %ld s\n", data.rippingHourMeter);
+    Serial.println("===================================================");
 
-    while (1)
-    {
-        modbus.printf("%c,%f,%f,%.2f", data.gps.status, data.gps.latitude, data.gps.longitude, data.voltageSupply);
-
-        vTaskDelay(pdMS_TO_TICKS(1000));
-    }
+    vTaskDelay(pdMS_TO_TICKS(1000));
+  }
 }
+
+/*==========================================================================*/
+/* FUNCTIONS THAT MIGHT BE USED IN THE FUTURE */
+/*==========================================================================*/
 
 /**
  * @brief   : Task to receive new config and update them.
@@ -264,47 +317,13 @@ static void sendToRS485(void *pvParam)
  * @param   : none
  * @retval  : none
  */
-static void serialConfig(void *pvParam)
-{
-    while (1)
-    {
-        // TODO: Print RS485 input
-        // TODO: Parse
-        // TODO: update to EEPROM
-    }
-}
-
-static void countingHourMeter(void *pvParam)
-{
-    DateTime startTime = rtc->now();
-    Serial.printf("[HM] Start Time : \n");
-
-    DateTime pollingTime;
-    time_t runHour, totalRunHour;
-
-    // time_t currentHourMeter = 900;
-    while (1)
-    {
-        pollingTime = rtc->now();
-
-        // Serial.printf("Polling Time: %ld s, Start Time: %lu s\n", pollingTime.secondstime(), startTime.secondstime());
-
-        runHour = static_cast<time_t>(pollingTime.secondstime()) - static_cast<time_t>(startTime.secondstime());
-        // BUG: this printf gives me big number. but the totalRunHour is right
-        // Serial.printf("[HM] run Hour : %lu s\n");
-
-        totalRunHour = currentHourMeter + runHour;
-        Serial.printf("[HM] this machine has running hour of %ld s\n", totalRunHour);
-
-        if (hm->saveToStorage(totalRunHour))
-        {
-            Serial.println("[HM] total run hour is saved to storage");
-        }
-        else
-        {
-            Serial.println("[HM] total run hour is failed to be saved");
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(1000));
-    }
-}
+// static void serialConfig(void *pvParam)
+// {
+//     while (1)
+//     {
+//         // TODO: Print RS485 input
+//         // TODO: Parse
+//         // TODO: update to EEPROM
+//     }
+// }
+/* =============================================== */
