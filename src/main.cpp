@@ -27,7 +27,6 @@ static void rippingCounter(void *pvParam);
 static void dozingCounter(void *pvParam);
 static void neutralMonitoring(void *pvParam);
 static void printDebug(void *pvParam);
-void IRAM_ATTR onDIChange();
 static void digitalInputInit();
 
 /* FORWARD DECLARATION UNTUK HANDLER DAN SEMAPHORE RTOS */
@@ -76,19 +75,13 @@ void setup() {
   Serial.println("[AIN] Inisialisasi Analog Input");
   ain                      = new AnalogInput();
   data.alternatorHourMeter = ain->readAnalogInput(
-      AnalogPin::PIN_A0);  // untuk membaca di pin_a3 (PIN 4 pada silkscreen)
-  // TODO: Check alternator status
+      AnalogPin::PIN_A0);  // To read from A0 (PIN 1 on the silkscreen)
 
   /* DIGITAL INPUT FOR RIPPING AND DOZING INIT */
   digitalInputInit();
 
   machineState    = MachineState::NEUTRAL;
   alternatorState = AlternatorState::OFF;
-
-  /* BLE INIT */
-  // BLEDevice::init("OMU BLE BEACON");
-  // BLEDevice::setPower(ESP_PWR_LVL_N12);
-  // pAdvertising = BLEDevice::getAdvertising();
 
   /* HOUR METER INIT */
   alternator               = new HourMeter("alternator.txt");
@@ -105,20 +98,16 @@ void setup() {
   data.dozingHourMeter = dozing->loadHMFromStorage("dozing.txt");
   Serial.printf("[HM] Hour Meter DOZING yang tersimpan adalah %ld\n",
                 data.dozingHourMeter);
-  // TODO: Print juga hour meter dalam jam
 
   // LOAD DEVICE ID
-  // Sementara hard-code dulu
+  // The ID IS HARD-CODED FOR A WHILE
   data.ID = "CD001";
 
   /* DISPLAY COM INIT */
   // TODO: ganti jadi display com
   Serial.println("[485] Inisialisasi RS485");
-  // modbus.begin(9600, SERIAL_8N1, PIN_RX_RS485, PIN_TX_RS485);
   displayCom.begin(9600, SERIAL_8N1, PIN_RX_SERIAL2, PIN_TX_SERIAL2);
 
-  // xTaskCreatePinnedToCore(alternatorMonitoring, "Updating Alternator Hour
-  // Meter", 2048, NULL, 3, &alternatorMonitoringHandler, 0);
   xTaskCreatePinnedToCore(rippingCounter, "Updating Ripping Hour Meter", 4096,
                           NULL, 2, &rippingCounterHandler, 0);
   xTaskCreatePinnedToCore(dozingCounter, "Updating Dozing Hour Meter", 4096,
@@ -133,10 +122,6 @@ void setup() {
                           &neutralMonitoringHandler, 0);
   xTaskCreatePinnedToCore(printDebug, "Print Debug", 2048, NULL, 3,
                           &printDebugHandler, 0);
-  // xTaskCreatePinnedToCore(sendBLEData, "Send BLE
-  // Data", 2048, NULL, 3, &sendBLEDataHandler, 0);
-  // xTaskCreatePinnedToCore(retrieveGPSData, "get GPS Data", 2048, NULL, 4,
-  // &retrieveGPSHandler, 1);
 }
 
 void loop() {}
@@ -175,15 +160,11 @@ static void sendToDisplay(void *pvParam) {
                       data.ID.c_str(), data.currentDate.c_str(),
                       data.currentTime.c_str());
 
-    // Serial.println("[display] data is sent to the display");
-
     vTaskDelay(pdMS_TO_TICKS(1000));
   }
 }
 
 static void alternatorMonitoring(void *pvParam) {
-  // AlternatorState lastAlternatorState = alternatorState;
-
   while (1) {
     data.alternatorValue = ain->readAnalogInput(AnalogPin::PIN_A0);
 
@@ -290,11 +271,7 @@ static void dozingCounter(void *pvParam) {
 }
 
 static void neutralMonitoring(void *pvParam) {
-  // MachineState lastMachineState = machineState;
-
   while (1) {
-    // data.neutralStatus = digitalRead(PIN_DIGITAL_IN_2);
-
     if (digitalRead(PIN_DIGITAL_IN_2) == LOW) {
       machineState = MachineState::ACTIVE;
     } else {
@@ -305,43 +282,10 @@ static void neutralMonitoring(void *pvParam) {
   }
 }
 
-void IRAM_ATTR onDIChange() {
-  BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-
-  // Check the state of digital inputs
-  bool isDI3Active = (digitalRead(PIN_DIGITAL_IN_3) == LOW);  // Ripping trigger
-  bool isDI4Active = (digitalRead(PIN_DIGITAL_IN_4) == LOW);  // Dozing trigger
-
-  // if standby, return
-
-  // Check alternator voltage and machine status
-  // if (alternatorVoltage > 27.0 && machineStatus != MachineStatus::NEUTRAL)
-  // {
-  if (isDI3Active && isDI4Active) {
-    // Both DI3 and DI4 are active, start ripping task
-    // Serial.println("di3 di4 active");
-    xTaskNotifyFromISR(rippingCounterHandler, 0, eNoAction,
-                       &xHigherPriorityTaskWoken);
-  } else if (isDI4Active) {
-    // Serial.println("di4 active");
-    // Only DI3 is active, start dozing task
-    xTaskNotifyFromISR(dozingCounterHandler, 0, eNoAction,
-                       &xHigherPriorityTaskWoken);
-  }
-
-  if (xHigherPriorityTaskWoken == pdTRUE) {
-    portYIELD_FROM_ISR();
-  }
-}
-
 void digitalInputInit() {
   pinMode(PIN_DIGITAL_IN_3, INPUT_PULLUP);
   pinMode(PIN_DIGITAL_IN_4, INPUT_PULLUP);
   pinMode(PIN_DIGITAL_IN_2, INPUT_PULLUP);
-
-  // attachInterrupt(digitalPinToInterrupt(PIN_DIGITAL_IN_3), onDIChange,
-  // FALLING); attachInterrupt(digitalPinToInterrupt(PIN_DIGITAL_IN_4),
-  // onDIChange, FALLING);
 }
 
 static void printDebug(void *pvParam) {
@@ -354,12 +298,8 @@ static void printDebug(void *pvParam) {
     Serial.printf(
         "Machine Status\t\t: %s\n",
         (machineState == MachineState::ACTIVE) ? "ACTIVE" : "NEUTRAL");
-    // Serial.printf("Dozing Status\t\t: %ld s\n",
-    //               (data.dozingStatus) ? "LOW" : "HIGH");
     Serial.printf("Dozing HM\t\t: %ld s\n", data.dozingHourMeter);
     Serial.printf("Ripping HM\t\t: %ld s\n", data.rippingHourMeter);
-    // Serial.printf("Ripping Status\t\t: %ld s\n",
-    //               (data.rippingStatus) ? "LOW" : "HIGH");
     Serial.println("===================================================");
 
     vTaskDelay(pdMS_TO_TICKS(1000));
@@ -367,7 +307,7 @@ static void printDebug(void *pvParam) {
 }
 
 /*==========================================================================*/
-/* DEPRECIATED FUNCTIONS. MIGHT BE USED IN THE FUTURE */
+/* FUNCTIONS THAT MIGHT BE USED IN THE FUTURE */
 /*==========================================================================*/
 
 /**
@@ -386,44 +326,4 @@ static void printDebug(void *pvParam) {
 //         // TODO: update to EEPROM
 //     }
 // }
-
-// static void countingHourMeter(void *pvParam)
-// {
-//     DateTime startTime = rtc->now();
-//     Serial.printf("[HM] Start Time : \n");
-
-//     DateTime pollingTime;
-//     time_t runHour, totalRunHour;
-
-//     // time_t currentHourMeter = 900;
-//     while (1)
-//     {
-//         pollingTime = rtc->now();
-
-//         // Serial.printf("Polling Time: %ld s, Start Time: %lu s\n",
-//         pollingTime.secondstime(), startTime.secondstime());
-
-//         runHour = static_cast<time_t>(pollingTime.secondstime()) -
-//         static_cast<time_t>(startTime.secondstime());
-//         // BUG: this printf gives me big number. but the totalRunHour is
-//         right
-//         // Serial.printf("[HM] run Hour : %lu s\n");
-
-//         totalRunHour = currentHourMeter + runHour;
-//         Serial.printf("[HM] this machine has running hour of %ld s\n",
-//         totalRunHour);
-
-//         if (hm->saveToStorage(totalRunHour))
-//         {
-//             Serial.println("[HM] total run hour is saved to storage");
-//         }
-//         else
-//         {
-//             Serial.println("[HM] total run hour is failed to be saved");
-//         }
-
-//         vTaskDelay(pdMS_TO_TICKS(1000));
-//     }
-// }
-
 /* =============================================== */
