@@ -166,10 +166,10 @@ static void sendToDisplay(void *pvParam) {
     char dozingBuffer[20];
 
     // Convert time_t values to C-strings using snprintf
-    snprintf(rippingBuffer, sizeof(rippingBuffer), "%ld",
-             static_cast<long>(data.rippingHourMeter));
-    snprintf(dozingBuffer, sizeof(dozingBuffer), "%ld",
-             static_cast<long>(data.dozingHourMeter));
+    snprintf(rippingBuffer, sizeof(rippingBuffer), "%.4f",
+             (data.rippingHourMeter / 3600.0));
+    snprintf(dozingBuffer, sizeof(dozingBuffer), "%.4f",
+             (data.dozingHourMeter / 3600.0));
 
     displayCom.printf("DATA1,%s,%s,%s,%s,%s,\r\n", rippingBuffer, dozingBuffer,
                       data.ID.c_str(), data.currentDate.c_str(),
