@@ -50,9 +50,3 @@ enum class AlternatorState {
   ON,
   OFF,
 };
-
-// struct BeaconData_t {
-//     GPSData_t gps;
-//     float voltageSupply;
-//     time_t hourMeter;
-// };
