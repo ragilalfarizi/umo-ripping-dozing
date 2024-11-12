@@ -11,7 +11,7 @@
 #define PIN_TX_SERIAL2   17
 #define PIN_RX_SERIAL2   16
 
-#define DEFAULT_ALTERNATOR_THRESHOLD 2.00
+#define DEFAULT_ALTERNATOR_THRESHOLD 27.00
 
 // New Way
 struct GPSData_t {
@@ -50,9 +50,3 @@ enum class AlternatorState {
   ON,
   OFF,
 };
-
-// struct BeaconData_t {
-//     GPSData_t gps;
-//     float voltageSupply;
-//     time_t hourMeter;
-// };

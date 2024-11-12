@@ -151,9 +151,9 @@ static void sendToDisplay(void *pvParam) {
     char dozingBuffer[20];
 
     // Convert time_t values to C-strings using snprintf
-    snprintf(rippingBuffer, sizeof(rippingBuffer), "%.4f",
+    snprintf(rippingBuffer, sizeof(rippingBuffer), "%.2f",
              (data.rippingHourMeter / 3600.0));
-    snprintf(dozingBuffer, sizeof(dozingBuffer), "%.4f",
+    snprintf(dozingBuffer, sizeof(dozingBuffer), "%.2f",
              (data.dozingHourMeter / 3600.0));
 
     displayCom.printf("DATA1,%s,%s,%s,%s,%s,\r\n", rippingBuffer, dozingBuffer,
@@ -227,7 +227,7 @@ static void rippingCounter(void *pvParam) {
 static void dozingCounter(void *pvParam) {
   DateTime startTime, currentTime;
   time_t runTimeAccrued = 0;
-  bool counting = false;  // Tracks whether counting is active
+  bool counting         = false;  // Tracks whether counting is active
 
   while (1) {
     // Poll the conditions
@@ -245,9 +245,9 @@ static void dozingCounter(void *pvParam) {
         counting = true;
       }
 
-      currentTime = rtc->now();
-      runTimeAccrued     = static_cast<time_t>(currentTime.secondstime() -
-                                        startTime.secondstime());
+      currentTime    = rtc->now();
+      runTimeAccrued = static_cast<time_t>(currentTime.secondstime() -
+                                           startTime.secondstime());
       data.dozingHourMeter += runTimeAccrued;
 
       Serial.printf("[HM] Total dozing time: %ld s\n", data.dozingHourMeter);
