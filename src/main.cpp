@@ -69,6 +69,8 @@ void setup() {
     // This line sets the RTC with an explicit date & time, for example to set
     // January 21, 2014 at 3am you would call:
     // rtc.adjust(DateTime(2014, 1, 21, 3, 0, 0));
+
+    Serial.println("FIRMWARE VERSI ACTIVE LOW");
   }
 
   /* ANALOG INPUT FOR ALTERNATOR INIT */
@@ -234,6 +236,7 @@ static void dozingCounter(void *pvParam) {
     bool isAlternatorOn  = (alternatorState == AlternatorState::ON);
     bool isMachineActive = (machineState == MachineState::ACTIVE);
     bool isDI4Low        = (digitalRead(PIN_DIGITAL_IN_4) == LOW);
+
     bool isDI3High       = (digitalRead(PIN_DIGITAL_IN_3) == HIGH);
 
     if (isAlternatorOn && isMachineActive && isDI4Low && isDI3High) {
@@ -272,7 +275,7 @@ static void dozingCounter(void *pvParam) {
 
 static void neutralMonitoring(void *pvParam) {
   while (1) {
-    if (digitalRead(PIN_DIGITAL_IN_2) == LOW) {
+    if (digitalRead(PIN_DIGITAL_IN_2) == HIGH) {
       machineState = MachineState::ACTIVE;
     } else {
       machineState = MachineState::NEUTRAL;
@@ -287,7 +290,7 @@ void digitalInputInit() {
   pinMode(PIN_DIGITAL_IN_4, INPUT_PULLUP);
   pinMode(PIN_DIGITAL_IN_2, INPUT_PULLUP);
 }
-
+  
 static void printDebug(void *pvParam) {
   while (1) {
     Serial.println("===================================================");
