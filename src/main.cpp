@@ -51,6 +51,14 @@ void setup() {
   Serial.begin(9600);
   Serial.println("[Serial] Mesin dinyalakan");
 
+  Serial.printf("===================\n");
+  Serial.printf(
+      "Mode: DIGITAL INPUT ACTIVE WHEN THERE IS VOLTAGE INPUT. (Active "
+      "HIGH)\n");
+  // Serial.printf("Mode: DIGITAL INPUT ACTIVE WHEN THERE IS VOLTAGE INPUT.
+  // (Active LOW)\n");
+  Serial.printf("===================\n");
+
   /* RTC INIT */
   Serial.println("[RTC] Inisialisasi RTC");
   rtc = new RTC();
@@ -181,30 +189,51 @@ static void alternatorMonitoring(void *pvParam) {
 }
 
 static void rippingCounter(void *pvParam) {
-  DateTime startTime, currentTime;
-  time_t runTimeAccrued = 0;
-  bool counting         = false;  // Tracks whether counting is active
+  DateTime startTime, currentTime, previousTime;
+  int8_t intervalRaw  = 0;
+  time_t intervalTime = 0;
+  // time_t runTimeAccrued = 0;
+  bool counting = false;  // Tracks whether counting is active
 
   while (1) {
     // Poll the conditions
     bool isAlternatorOn  = (alternatorState == AlternatorState::ON);
     bool isMachineActive = (machineState == MachineState::ACTIVE);
-    bool isDI4Low        = (digitalRead(PIN_DIGITAL_IN_4) == LOW);
-    bool isDI3Low        = (digitalRead(PIN_DIGITAL_IN_3) == LOW);
 
-    if (isAlternatorOn && isMachineActive && isDI4Low && isDI3Low) {
+    // NOTE: on isDI4Active - isDI3Active
+    // Active High -> LOW - LOW
+    // Active Low -> HIGH - HIGH
+    bool isDI4Active = (digitalRead(PIN_DIGITAL_IN_4) == LOW);
+    bool isDI3Active = (digitalRead(PIN_DIGITAL_IN_3) == LOW);
+
+    if (isAlternatorOn && isMachineActive && isDI4Active && isDI3Active) {
       // All conditions are met; start or continue counting
       if (!counting) {
         startTime = rtc->now();
         Serial.printf("[HM] Ripping Counter started at %02d:%02d:%02d\n",
                       startTime.hour(), startTime.minute(), startTime.second());
-        counting = true;
+        counting     = true;
+        previousTime = startTime;
       }
 
-      currentTime    = rtc->now();
-      runTimeAccrued = static_cast<time_t>(currentTime.secondstime() -
-                                           startTime.secondstime());
-      data.rippingHourMeter += runTimeAccrued;
+      currentTime = rtc->now();
+
+      // NOTE: DEPRECIATED
+      // runTimeAccrued = static_cast<time_t>(currentTime.secondstime() -
+      //                                      startTime.secondstime());
+
+      intervalRaw =
+          (int8_t)(currentTime.secondstime() - previousTime.secondstime());
+
+      if (intervalRaw > 11 || intervalRaw < 0) {
+        intervalTime = 10;
+      } else {
+        intervalTime = (time_t)abs(intervalRaw);
+      }
+
+      data.rippingHourMeter += intervalTime;
+
+      previousTime = currentTime;
 
       Serial.printf("[HM] Total ripping time: %ld s\n", data.rippingHourMeter);
 
@@ -222,36 +251,56 @@ static void rippingCounter(void *pvParam) {
       counting = false;
     }
 
-    vTaskDelay(pdMS_TO_TICKS(1000));  // Check conditions every second
+    vTaskDelay(pdMS_TO_TICKS(10000));  // Check conditions every second
   }
 }
 
 static void dozingCounter(void *pvParam) {
-  DateTime startTime, currentTime;
-  time_t runTimeAccrued = 0;
-  bool counting         = false;  // Tracks whether counting is active
+  DateTime startTime, currentTime, previousTime;
+  int8_t intervalRaw  = 0;
+  time_t intervalTime = 0;
+  // time_t runTimeAccrued = 0;
+  bool counting = false;  // Tracks whether counting is active
 
   while (1) {
     // Poll the conditions
     bool isAlternatorOn  = (alternatorState == AlternatorState::ON);
     bool isMachineActive = (machineState == MachineState::ACTIVE);
-    bool isDI4Low        = (digitalRead(PIN_DIGITAL_IN_4) == LOW);
 
-    bool isDI3High       = (digitalRead(PIN_DIGITAL_IN_3) == HIGH);
+    // NOTE: on isDI4Active - isDI3NotActive
+    // Active High -> LOW - HIGH
+    // Active Low -> HIGH - LOW
+    bool isDI4Active    = (digitalRead(PIN_DIGITAL_IN_4) == LOW);
+    bool isDI3NotActive = (digitalRead(PIN_DIGITAL_IN_3) == HIGH);
 
-    if (isAlternatorOn && isMachineActive && isDI4Low && isDI3High) {
+    if (isAlternatorOn && isMachineActive && isDI4Active && isDI3NotActive) {
       // All conditions are met; start or continue counting
       if (!counting) {
         startTime = rtc->now();
         Serial.printf("[HM] Dozing Counter started at %02d:%02d:%02d\n",
                       startTime.hour(), startTime.minute(), startTime.second());
         counting = true;
+
+        previousTime = startTime;
       }
 
-      currentTime    = rtc->now();
-      runTimeAccrued = static_cast<time_t>(currentTime.secondstime() -
-                                           startTime.secondstime());
-      data.dozingHourMeter += runTimeAccrued;
+      currentTime = rtc->now();
+
+      // NOTE: DEPRECIATED
+      // runTimeAccrued = static_cast<time_t>(currentTime.secondstime() -
+      //                                      startTime.secondstime());
+
+      intervalRaw =
+          (int8_t)(currentTime.secondstime() - previousTime.secondstime());
+      if (intervalRaw > 11 || intervalRaw < 0) {
+        intervalTime = 10;
+      } else {
+        intervalTime = (time_t)abs(intervalRaw);
+      }
+
+      data.dozingHourMeter += intervalTime;
+
+      previousTime = currentTime;
 
       Serial.printf("[HM] Total dozing time: %ld s\n", data.dozingHourMeter);
 
@@ -269,13 +318,16 @@ static void dozingCounter(void *pvParam) {
       counting = false;
     }
 
-    vTaskDelay(pdMS_TO_TICKS(1000));  // Check conditions every second
+    vTaskDelay(pdMS_TO_TICKS(10000));  // Check conditions every second
   }
 }
 
 static void neutralMonitoring(void *pvParam) {
   while (1) {
-    if (digitalRead(PIN_DIGITAL_IN_2) == HIGH) {
+    // NOTE: on digitalRead(PIN_DIGITAL_IN_2)
+    // Active High -> LOW
+    // Active Low -> HIGH
+    if (digitalRead(PIN_DIGITAL_IN_2) == LOW) {
       machineState = MachineState::ACTIVE;
     } else {
       machineState = MachineState::NEUTRAL;
@@ -290,7 +342,7 @@ void digitalInputInit() {
   pinMode(PIN_DIGITAL_IN_4, INPUT_PULLUP);
   pinMode(PIN_DIGITAL_IN_2, INPUT_PULLUP);
 }
-  
+
 static void printDebug(void *pvParam) {
   while (1) {
     Serial.println("===================================================");
